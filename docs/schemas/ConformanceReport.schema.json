@@ -1,0 +1,108 @@
+{
+  "$defs": {
+    "ConformanceItem": {
+      "additionalProperties": false,
+      "description": "Resultado da avaliação de conformidade de uma `RegraExtraida`.",
+      "properties": {
+        "delta": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delta"
+        },
+        "recomendacao": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recomendacao"
+        },
+        "regra_id": {
+          "title": "Regra Id",
+          "type": "string"
+        },
+        "severidade": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Severidade",
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/$defs/StatusConformidade"
+        }
+      },
+      "required": [
+        "regra_id",
+        "status",
+        "severidade"
+      ],
+      "title": "ConformanceItem",
+      "type": "object"
+    },
+    "StatusConformidade": {
+      "description": "Vocabulário fechado de status de um `ConformanceItem` (FR-004).",
+      "enum": [
+        "conforme",
+        "não conforme",
+        "novo",
+        "alterado",
+        "revogado"
+      ],
+      "title": "StatusConformidade",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Agregado de todos os `ConformanceItem` avaliados em uma execução.",
+  "properties": {
+    "criticidade_maxima": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StatusConformidade"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "gerado_em": {
+      "format": "date-time",
+      "title": "Gerado Em",
+      "type": "string"
+    },
+    "itens": {
+      "items": {
+        "$ref": "#/$defs/ConformanceItem"
+      },
+      "title": "Itens",
+      "type": "array"
+    },
+    "report_id": {
+      "title": "Report Id",
+      "type": "string"
+    },
+    "resumo": {
+      "title": "Resumo",
+      "type": "string"
+    }
+  },
+  "required": [
+    "report_id",
+    "gerado_em",
+    "resumo"
+  ],
+  "title": "ConformanceReport",
+  "type": "object"
+}

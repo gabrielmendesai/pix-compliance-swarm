@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "StatusConformidade": {
+      "description": "Vocabulário fechado de status de um `ConformanceItem` (FR-004).",
+      "enum": [
+        "conforme",
+        "não conforme",
+        "novo",
+        "alterado",
+        "revogado"
+      ],
+      "title": "StatusConformidade",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Resultado da avaliação de conformidade de uma `RegraExtraida`.",
+  "properties": {
+    "delta": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Delta"
+    },
+    "recomendacao": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Recomendacao"
+    },
+    "regra_id": {
+      "title": "Regra Id",
+      "type": "string"
+    },
+    "severidade": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Severidade",
+      "type": "number"
+    },
+    "status": {
+      "$ref": "#/$defs/StatusConformidade"
+    }
+  },
+  "required": [
+    "regra_id",
+    "status",
+    "severidade"
+  ],
+  "title": "ConformanceItem",
+  "type": "object"
+}

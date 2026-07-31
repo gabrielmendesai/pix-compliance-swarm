@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "CategoriaCompliance": {
+      "description": "As 6 categorias fechadas de compliance PIX (FR-002).",
+      "enum": [
+        "participantes",
+        "tarifas",
+        "liquidação",
+        "segurança",
+        "SLA",
+        "interoperabilidade"
+      ],
+      "title": "CategoriaCompliance",
+      "type": "string"
+    },
+    "Obrigatoriedade": {
+      "description": "Grau de obrigatoriedade de uma regra extraída.",
+      "enum": [
+        "obrigatório",
+        "recomendado",
+        "opcional"
+      ],
+      "title": "Obrigatoriedade",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Regra de compliance individual extraída de um `NormativoItem`.",
+  "properties": {
+    "atores_afetados": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Atores Afetados",
+      "type": "array"
+    },
+    "categoria": {
+      "$ref": "#/$defs/CategoriaCompliance"
+    },
+    "confianca": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confianca",
+      "type": "number"
+    },
+    "enunciado": {
+      "title": "Enunciado",
+      "type": "string"
+    },
+    "normativo_id": {
+      "title": "Normativo Id",
+      "type": "string"
+    },
+    "obrigatoriedade": {
+      "$ref": "#/$defs/Obrigatoriedade"
+    },
+    "prazo": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prazo"
+    },
+    "regra_id": {
+      "title": "Regra Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "regra_id",
+    "normativo_id",
+    "categoria",
+    "enunciado",
+    "obrigatoriedade",
+    "atores_afetados",
+    "confianca"
+  ],
+  "title": "RegraExtraida",
+  "type": "object"
+}

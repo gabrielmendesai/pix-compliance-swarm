@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "ReportOutput": {
+      "additionalProperties": false,
+      "description": "Metadados de saída de um relatório de conformidade gerado.",
+      "properties": {
+        "gerado_em": {
+          "format": "date-time",
+          "title": "Gerado Em",
+          "type": "string"
+        },
+        "json_path": {
+          "title": "Json Path",
+          "type": "string"
+        },
+        "pdf_path": {
+          "title": "Pdf Path",
+          "type": "string"
+        },
+        "total_gaps": {
+          "minimum": 0,
+          "title": "Total Gaps",
+          "type": "integer"
+        },
+        "total_normativos": {
+          "minimum": 0,
+          "title": "Total Normativos",
+          "type": "integer"
+        },
+        "total_regras": {
+          "minimum": 0,
+          "title": "Total Regras",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "json_path",
+        "pdf_path",
+        "total_normativos",
+        "total_regras",
+        "total_gaps",
+        "gerado_em"
+      ],
+      "title": "ReportOutput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Saída do agente orquestrador.",
+  "properties": {
+    "concluido_em": {
+      "format": "date-time",
+      "title": "Concluido Em",
+      "type": "string"
+    },
+    "erro": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Erro"
+    },
+    "iniciado_em": {
+      "format": "date-time",
+      "title": "Iniciado Em",
+      "type": "string"
+    },
+    "pipeline_id": {
+      "title": "Pipeline Id",
+      "type": "string"
+    },
+    "report": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReportOutput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sucesso": {
+      "title": "Sucesso",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "pipeline_id",
+    "sucesso",
+    "iniciado_em",
+    "concluido_em"
+  ],
+  "title": "PipelineResult",
+  "type": "object"
+}

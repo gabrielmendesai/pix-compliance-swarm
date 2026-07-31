@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "description": "Documento ainda não processado, capturado da fonte original.",
+  "properties": {
+    "bytes_ref": {
+      "title": "Bytes Ref",
+      "type": "string"
+    },
+    "coletado_em": {
+      "format": "date-time",
+      "title": "Coletado Em",
+      "type": "string"
+    },
+    "content_type": {
+      "title": "Content Type",
+      "type": "string"
+    },
+    "hash_conteudo": {
+      "title": "Hash Conteudo",
+      "type": "string"
+    },
+    "source_uri": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Source Uri",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_uri",
+    "content_type",
+    "bytes_ref",
+    "hash_conteudo",
+    "coletado_em"
+  ],
+  "title": "RawDocument",
+  "type": "object"
+}

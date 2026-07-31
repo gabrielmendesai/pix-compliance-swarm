@@ -1,0 +1,27 @@
+{
+  "additionalProperties": false,
+  "description": "Contrato de saída de busca semântica.",
+  "properties": {
+    "normativo_id": {
+      "title": "Normativo Id",
+      "type": "string"
+    },
+    "score": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Score",
+      "type": "number"
+    },
+    "trecho": {
+      "title": "Trecho",
+      "type": "string"
+    }
+  },
+  "required": [
+    "score",
+    "trecho",
+    "normativo_id"
+  ],
+  "title": "SearchResult",
+  "type": "object"
+}

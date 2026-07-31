@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "description": "Contrato de entrada de busca semântica sobre o corpus de normativos/regras.",
+  "properties": {
+    "filtros": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Filtros"
+    },
+    "query": {
+      "title": "Query",
+      "type": "string"
+    },
+    "top_k": {
+      "minimum": 1,
+      "title": "Top K",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "query",
+    "top_k"
+  ],
+  "title": "SearchQuery",
+  "type": "object"
+}

@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "CategoriaCompliance": {
+      "description": "As 6 categorias fechadas de compliance PIX (FR-002).",
+      "enum": [
+        "participantes",
+        "tarifas",
+        "liquidação",
+        "segurança",
+        "SLA",
+        "interoperabilidade"
+      ],
+      "title": "CategoriaCompliance",
+      "type": "string"
+    },
+    "TipoNormativo": {
+      "description": "Vocabulário fechado do tipo de ato normativo do BCB.",
+      "enum": [
+        "Resolução BCB",
+        "Instrução Normativa",
+        "Circular",
+        "Comunicado"
+      ],
+      "title": "TipoNormativo",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Item normativo do BCB/PIX já processado; imutável após criação.",
+  "properties": {
+    "artigo": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artigo"
+    },
+    "categoria": {
+      "$ref": "#/$defs/CategoriaCompliance"
+    },
+    "data_publicacao": {
+      "format": "date",
+      "title": "Data Publicacao",
+      "type": "string"
+    },
+    "data_vigencia": {
+      "format": "date",
+      "title": "Data Vigencia",
+      "type": "string"
+    },
+    "hash_conteudo": {
+      "title": "Hash Conteudo",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "inciso": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Inciso"
+    },
+    "numero": {
+      "title": "Numero",
+      "type": "string"
+    },
+    "texto": {
+      "title": "Texto",
+      "type": "string"
+    },
+    "tipo": {
+      "$ref": "#/$defs/TipoNormativo"
+    },
+    "titulo": {
+      "title": "Titulo",
+      "type": "string"
+    },
+    "url_origem": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Url Origem",
+      "type": "string"
+    },
+    "versao": {
+      "minimum": 1,
+      "title": "Versao",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "titulo",
+    "tipo",
+    "numero",
+    "texto",
+    "data_publicacao",
+    "data_vigencia",
+    "categoria",
+    "url_origem",
+    "hash_conteudo",
+    "versao"
+  ],
+  "title": "NormativoItem",
+  "type": "object"
+}

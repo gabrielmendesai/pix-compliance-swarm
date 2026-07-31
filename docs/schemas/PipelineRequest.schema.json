@@ -1,0 +1,32 @@
+{
+  "additionalProperties": false,
+  "description": "Entrada do agente orquestrador que coordena todo o pipeline.",
+  "properties": {
+    "fontes": {
+      "items": {
+        "format": "uri",
+        "maxLength": 2083,
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Fontes",
+      "type": "array"
+    },
+    "forcar_reprocessamento": {
+      "default": false,
+      "title": "Forcar Reprocessamento",
+      "type": "boolean"
+    },
+    "pipeline_id": {
+      "title": "Pipeline Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pipeline_id",
+    "fontes"
+  ],
+  "title": "PipelineRequest",
+  "type": "object"
+}

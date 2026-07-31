@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"C:\\\\Users\\\\GMend\\\\Desktop\\\\Pix Compliance Swarm\\\\.specify\\\\scripts\\\\powershell\\\\setup-plan.ps1\" -Json)",
+      "PowerShell(& \"C:\\\\Users\\\\GMend\\\\Desktop\\\\Pix Compliance Swarm\\\\.specify\\\\scripts\\\\powershell\\\\setup-tasks.ps1\" -Json)",
+      "PowerShell(& \"C:\\\\Users\\\\GMend\\\\Desktop\\\\Pix Compliance Swarm\\\\.specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\" -Json -RequireTasks -IncludeTasks)",
+      "Bash(python -m pip install -e \".[dev]\" -q)",
+      "Bash(python -m pytest tests/test_config.py -v)",
+      "Bash(cp .env.example .env)",
+      "Bash(sed -i 's/AWS_ACCESS_KEY_ID=/AWS_ACCESS_KEY_ID=AKIAFAKE/; s/AWS_SECRET_ACCESS_KEY=/AWS_SECRET_ACCESS_KEY=fakesecret/' .env)",
+      "Bash(PYTHONPATH=src python -c \"from pix_compliance.config import settings; print\\(settings.model_dump\\(\\)\\)\")",
+      "Bash(sed -i '/^AWS_REGION=/d' .env)",
+      "Bash(PYTHONPATH=src python -c \"from pix_compliance.config import settings\")",
+      "Bash(python -m pytest tests/test_config.py -q)",
+      "Bash(PYTHONPATH=src python -m pytest tests/test_logging.py -v)",
+      "Bash(python -m pix_compliance.logging)",
+      "Bash(python -m ruff check .)",
+      "Bash(python -m pytest -q)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(make --version)",
+      "Bash(echo \"grep-exit:$?\")"
+    ]
+  }
+}

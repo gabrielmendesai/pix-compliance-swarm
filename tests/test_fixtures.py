@@ -71,7 +71,13 @@ def test_pii_documentos_minimos_pdf_e_html():
     assert len([d for d in documentos if d.suffix == ".html"]) >= 3
 
 
-def test_pii_cpf_valido_e_cnpj_invalido_plantados_em_algum_documento():
+def test_pii_cpf_e_cnpj_validos_plantados_em_algum_documento():
+    """SPEC-004 (FR-012): o guardrail de PII valida dígito verificador de
+    verdade, então tanto o CPF quanto o CNPJ plantados precisam ter dígito
+    verificador correto — do contrário o guardrail não os reconheceria como
+    PII, quebrando silenciosamente a demonstração de ponta a ponta deste
+    fixture. Os dois ramos (válido/inválido) do guardrail já são cobertos
+    diretamente em tests/test_guardrails.py."""
     generate.main()
     htmls = list(DOCUMENTS_DIR.glob("*.html"))
     conteudo = "\n".join(html.read_text(encoding="utf-8") for html in htmls)
@@ -82,7 +88,7 @@ def test_pii_cpf_valido_e_cnpj_invalido_plantados_em_algum_documento():
     assert cpf_encontrado is not None
     assert cnpj_encontrado is not None
     assert pii.validar_cpf(cpf_encontrado.group()) is True
-    assert pii.validar_cnpj(cnpj_encontrado.group()) is False
+    assert pii.validar_cnpj(cnpj_encontrado.group()) is True
 
 
 def test_delta_pares_de_versao_existem_no_corpus():

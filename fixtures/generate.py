@@ -620,12 +620,17 @@ def _escrever_pdf(caminho: Path, titulo: str, texto: str) -> None:
 
 
 def _texto_com_pii(texto: str) -> str:
-    """Acrescenta um parágrafo com CPF/CNPJ fictícios plantados, cobrindo os
-    dois ramos de decisão do guardrail de PII: um identificador sintaticamente
-    válido e um inválido (FR-006)."""
+    """Acrescenta um parágrafo com CPF/CNPJ fictícios plantados.
+
+    Ambos com dígito verificador válido (SPEC-004, FR-012): o guardrail de
+    PII valida dígito verificador de verdade, então um CNPJ com dígito
+    inválido não seria reconhecido como PII e não seria mascarado, quebrando
+    silenciosamente a demonstração de ponta a ponta deste fixture. Os dois
+    ramos do guardrail (válido/inválido) já são cobertos diretamente pelos
+    testes de `tests/test_guardrails.py`, não precisam ser cobertos aqui."""
     rng = _rng()
     cpf = pii.gerar_cpf_valido(rng)
-    cnpj = pii.gerar_cnpj_invalido(rng)
+    cnpj = pii.gerar_cnpj_valido(rng)
     return (
         f"{texto} Contato para dúvidas: CPF {cpf}, CNPJ {cnpj} "
         "(documento fictício de teste do guardrail de PII)."

@@ -10,6 +10,8 @@ constituição) — a única forma de chegar aqui é pelo branch `"offline"` de
 
 import hashlib
 
+from pix_compliance.config import EMBEDDING_DIMENSION
+
 
 class OfflineChatProvider:
     """Mesmo prompt sempre produz a mesma resposta, sem chamada de rede —
@@ -21,12 +23,24 @@ class OfflineChatProvider:
 
 
 class OfflineEmbeddingsProvider:
-    """Vetor determinístico derivado de hash do texto — dimensão fixa
-    pequena, suficiente para testes que validam formato, não qualidade
-    semântica do embedding."""
+    """Vetor determinístico derivado de hash do texto — dimensão igual a
+    EMBEDDING_DIMENSION (SPEC-012), para permanecer compatível com o
+    `vector(512)` do PgVectorStore (SPEC-006). Um único digest SHA-256 (32
+    bytes) não basta; expande-se concatenando digests de `f"{text}:{i}"`
+    para i crescente até atingir a dimensão exigida. Sem sinal semântico
+    real — mesmo texto sempre produz o mesmo vetor, textos diferentes
+    produzem vetores efetivamente aleatórios entre si."""
 
-    _DIMENSIONS = 8
+    _DIMENSIONS = EMBEDDING_DIMENSION
 
     def embed(self, text: str) -> list[float]:
-        digest = hashlib.sha256(text.encode("utf-8")).digest()
-        return [byte / 255.0 for byte in digest[: self._DIMENSIONS]]
+        blocks: list[bytes] = []
+        counter = 0
+        total_bytes = 0
+        while total_bytes < self._DIMENSIONS:
+            digest = hashlib.sha256(f"{text}:{counter}".encode()).digest()
+            blocks.append(digest)
+            total_bytes += len(digest)
+            counter += 1
+        expanded = b"".join(blocks)[: self._DIMENSIONS]
+        return [byte / 255.0 for byte in expanded]

@@ -217,3 +217,42 @@ vinda do Extractor Agent. Ver `skills/compliance-analyzer-skill/SKILL.md`.
 python -m pix_compliance.agents.compliance_analyzer_agent fixtures/normativos.json
 pytest tests/test_compliance_analyzer_agent.py -q
 ```
+
+## Knowledge Builder Agent (`src/pix_compliance/agents/knowledge_builder_agent.py`)
+
+Indexa `NormativoItem` no `PgVectorStore` (SPEC-006) e serve busca semântica
+(RAG) via `search(SearchQuery) -> list[SearchResult]`. Diferente dos demais
+agentes do enxame (SPEC-008/009/010), não instancia `pydantic_ai.Agent` — não
+há decisão de LLM aqui, apenas geração determinística de embeddings (Titan
+V2, SPEC-005) e operações de storage.
+
+Cada `NormativoItem` é indexado como exatamente um chunk — não há
+subdivisão de `.texto` por uma janela fixa de caracteres/tokens. Essa é uma
+decisão de domínio, não uma escolha técnica arbitrária: normativos
+regulatórios são estruturados por natureza (artigo e inciso já são as
+unidades de sentido do próprio texto legal, e já existem como campos de
+`NormativoItem` desde a SPEC-002/SPEC-003). Ignorar essa estrutura em favor
+de uma janela fixa de tokens destruiria precisão de recuperação sem
+necessidade real — "chunking consciente de estrutura", aqui, significa
+apenas respeitar a granularidade já nativa do corpus produzido pelo
+Extractor Agent.
+
+O `chunk_id` de cada chunk é um hash determinístico de `normativo_id` +
+`artigo` + `inciso`, usado como chave de upsert no `PgVectorStore` —
+reindexar o mesmo corpus substitui (nunca duplica) os chunks
+correspondentes. `search()` reaproveita `SearchQuery`/`SearchResult`
+(SPEC-002) sem alteração, com suporte a filtro por metadados (ex.
+`categoria`) via `SearchQuery.filtros`.
+
+Reranking e busca híbrida (léxica + semântica) ficam fora de escopo desta
+feature. Busca híbrida é uma evolução futura possível — combinaria a busca
+semântica atual com um índice léxico (full-text search do próprio Postgres,
+por exemplo) para consultas onde correspondência exata de termo importa mais
+que similaridade semântica —, mas implementá-la agora seria especulação sem
+necessidade concreta (Princípio II, YAGNI). Ver
+`skills/knowledge-builder-skill/SKILL.md`.
+
+```bash
+python -m pix_compliance.agents.knowledge_builder_agent fixtures/normativos.json
+pytest tests/test_knowledge_builder_agent.py -q
+```

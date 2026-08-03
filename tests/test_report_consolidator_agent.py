@@ -1,0 +1,315 @@
+"""Testes do Report Consolidator Agent (SPEC-014).
+
+Escritos antes de `report_consolidator_agent.py` existir (Princípio IX da
+constituição). SPEC-011 (Conformance Validator) e SPEC-013 (API FastAPI)
+ainda não existem como código neste repositório — os testes constroem um
+`ConformanceReport` diretamente (sem depender de um Conformance Validator
+real) e usam `httpx.MockTransport` (parte do próprio `httpx`, já dependência
+do projeto — nenhuma dependência de teste nova) para simular a API FastAPI,
+tanto no caminho feliz quanto na indisponibilidade (ver research.md,
+Decisões 0 e 1).
+"""
+
+import ast
+from datetime import datetime
+from pathlib import Path
+
+import httpx
+import pytest
+from structlog.testing import capture_logs
+
+from pix_compliance.models import (
+    CategoriaCompliance,
+    ConformanceItem,
+    ConformanceReport,
+    NormativoItem,
+    Obrigatoriedade,
+    RegraExtraida,
+    StatusConformidade,
+)
+
+REQUIRED_ENV = {
+    "AWS_ACCESS_KEY_ID": "AKIAFAKEEXAMPLE",
+    "AWS_SECRET_ACCESS_KEY": "fake-secret",
+    "AWS_REGION": "us-east-1",
+    "BEDROCK_MODEL_ID": "anthropic.claude-3-fake",
+    "BEDROCK_EMBEDDINGS_MODEL_ID": "amazon.titan-embed-fake",
+    "API_URL": "http://mock-report-api.local",
+    "POSTGRES_DSN": "postgresql://pix:pix@localhost:5432/pix_compliance",
+    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
+    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
+    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
+    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
+    "BCB_BASE_URL": "http://localhost:8080",
+    "MCP_SCRAPER_HOST": "127.0.0.1",
+    "MCP_SCRAPER_PORT": "8100",
+    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
+    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
+}
+
+
+def _settings(monkeypatch):
+    for key, value in REQUIRED_ENV.items():
+        monkeypatch.setenv(key, value)
+
+    from pix_compliance.config import Settings
+
+    return Settings(_env_file=None)
+
+
+@pytest.fixture
+def settings(monkeypatch):
+    return _settings(monkeypatch)
+
+
+@pytest.fixture
+def object_store(settings):
+    from pix_compliance.object_store import S3ObjectStore
+
+    return S3ObjectStore(settings)
+
+
+@pytest.fixture
+def normativos() -> list[NormativoItem]:
+    return [
+        NormativoItem(
+            id="norm-tarifas",
+            titulo="Resolução BCB nº 1/2024 sobre tarifas",
+            tipo="Resolução BCB",
+            numero="1/2024",
+            artigo="1º",
+            inciso="I",
+            texto="Art. 1º Cobranca interbancaria vedada no arranjo PIX.",
+            data_publicacao=datetime(2024, 1, 1).date(),
+            data_vigencia=datetime(2024, 1, 1).date(),
+            categoria=CategoriaCompliance.TARIFAS,
+            url_origem="https://mock-bcb.local/normativos/1-2024.html",
+            hash_conteudo="a" * 64,
+            versao=1,
+        ),
+        NormativoItem(
+            id="norm-seguranca",
+            titulo="Instrução Normativa nº 2/2024 sobre segurança",
+            tipo="Instrução Normativa",
+            numero="2/2024",
+            artigo="2º",
+            inciso=None,
+            texto="Art. 2º Criptografia obrigatoria em repouso.",
+            data_publicacao=datetime(2024, 1, 8).date(),
+            data_vigencia=datetime(2024, 1, 8).date(),
+            categoria=CategoriaCompliance.SEGURANCA,
+            url_origem="https://mock-bcb.local/normativos/2-2024.html",
+            hash_conteudo="b" * 64,
+            versao=1,
+        ),
+    ]
+
+
+@pytest.fixture
+def regras() -> list[RegraExtraida]:
+    return [
+        RegraExtraida(
+            regra_id="regra-tarifas-1",
+            normativo_id="norm-tarifas",
+            categoria=CategoriaCompliance.TARIFAS,
+            enunciado="Cobranca interbancaria vedada entre participantes.",
+            obrigatoriedade=Obrigatoriedade.OBRIGATORIO,
+            atores_afetados=["participante"],
+            confianca=0.95,
+        ),
+        RegraExtraida(
+            regra_id="regra-seguranca-1",
+            normativo_id="norm-seguranca",
+            categoria=CategoriaCompliance.SEGURANCA,
+            enunciado="Criptografia obrigatoria de dados em repouso.",
+            obrigatoriedade=Obrigatoriedade.OBRIGATORIO,
+            atores_afetados=["participante"],
+            confianca=0.9,
+        ),
+    ]
+
+
+@pytest.fixture
+def conformance_report() -> ConformanceReport:
+    return ConformanceReport(
+        report_id="report-teste-014",
+        gerado_em=datetime(2024, 2, 1, 12, 0, 0),
+        itens=[
+            ConformanceItem(
+                regra_id="regra-tarifas-1",
+                status=StatusConformidade.CONFORME,
+                severidade=0.1,
+            ),
+            ConformanceItem(
+                regra_id="regra-seguranca-1",
+                status=StatusConformidade.NAO_CONFORME,
+                delta="Criptografia ausente no ambiente avaliado",
+                recomendacao="Habilitar criptografia em repouso imediatamente",
+                severidade=0.9,
+            ),
+        ],
+        resumo="Um gap crítico de segurança identificado; demais itens conformes.",
+        criticidade_maxima=StatusConformidade.NAO_CONFORME,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _reports_dir_isolado(tmp_path, monkeypatch):
+    """Isola o diretório local de artefatos (`reports/`) em `tmp_path` por
+    teste, evitando colisão de `report_id` entre execuções de teste."""
+    monkeypatch.chdir(tmp_path)
+
+
+class TestGenerateJson:
+    def test_generate_json_produz_report_output_correto(
+        self, conformance_report, normativos, regras
+    ) -> None:
+        from pix_compliance.agents.report_consolidator_agent import generate_json
+
+        resultado = generate_json(conformance_report, normativos, regras)
+
+        assert resultado.total_normativos == len(normativos)
+        assert resultado.total_regras == len(regras)
+        assert resultado.total_gaps == 1  # apenas o item "não conforme"
+        assert resultado.gerado_em == conformance_report.gerado_em
+
+        json_path = Path(resultado.json_path)
+        assert json_path.exists()
+        assert json_path.name == f"{conformance_report.report_id}.json"
+
+
+class TestGeneratePdf:
+    def test_generate_pdf_contem_cinco_secoes_obrigatorias(
+        self, conformance_report, normativos, regras, tmp_path
+    ) -> None:
+        import pdfplumber
+
+        from pix_compliance.agents.report_consolidator_agent import generate_pdf
+
+        output_path = tmp_path / f"{conformance_report.report_id}.pdf"
+        generate_pdf(conformance_report, normativos, regras, output_path)
+
+        assert output_path.exists()
+        with pdfplumber.open(output_path) as pdf:
+            texto = "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+        # Capa
+        assert conformance_report.report_id in texto
+        # Sumário executivo
+        assert "gap crítico de segurança" in texto
+        # Tabela de normativos coletados
+        assert "Resolução BCB nº 1/2024 sobre tarifas" in texto
+        # Regras agrupadas por categoria
+        assert "Criptografia obrigatoria de dados em repouso." in texto
+        # Gap analysis com severidade
+        assert "regra-seguranca-1" in texto
+
+
+class TestUploadArtifacts:
+    def test_upload_artifacts_envia_json_e_pdf_ao_object_store(
+        self, conformance_report, normativos, regras, object_store, tmp_path
+    ) -> None:
+        from pix_compliance.agents.report_consolidator_agent import (
+            generate_json,
+            generate_pdf,
+            upload_artifacts,
+        )
+
+        report_output = generate_json(conformance_report, normativos, regras)
+        pdf_path = tmp_path / f"{conformance_report.report_id}.pdf"
+        generate_pdf(conformance_report, normativos, regras, pdf_path)
+
+        upload_artifacts(
+            object_store, Path(report_output.json_path), pdf_path, conformance_report.report_id
+        )
+
+        json_bytes = object_store.download(f"reports/{conformance_report.report_id}.json")
+        pdf_bytes = object_store.download(f"reports/{conformance_report.report_id}.pdf")
+        assert json_bytes == Path(report_output.json_path).read_bytes()
+        assert pdf_bytes == pdf_path.read_bytes()
+
+
+class TestPublishToApi:
+    def test_publish_to_api_usa_url_de_settings(self, settings, conformance_report) -> None:
+        from pix_compliance.agents.report_consolidator_agent import generate_json, publish_to_api
+
+        report_output = generate_json(conformance_report, [], [])
+
+        urls_chamadas = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            urls_chamadas.append(str(request.url))
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = httpx.Client(base_url=settings.api_url, transport=httpx.MockTransport(handler))
+
+        publish_to_api(settings, report_output, client=client)
+
+        assert len(urls_chamadas) == 1
+        assert urls_chamadas[0].startswith(settings.api_url)
+
+    def test_nenhum_literal_de_url_no_codigo_fonte(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        caminho = repo_root / "src" / "pix_compliance" / "agents" / "report_consolidator_agent.py"
+        arvore = ast.parse(caminho.read_text(encoding="utf-8"), filename=str(caminho))
+
+        for node in ast.walk(arvore):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert "http://" not in node.value and "https://" not in node.value, (
+                    f"literal de URL encontrado em {caminho}: {node.value!r}"
+                )
+
+
+class TestDegradacaoControlada:
+    def test_publish_to_api_degrada_controladamente_quando_api_indisponivel(
+        self, settings, conformance_report
+    ) -> None:
+        from pix_compliance.agents.report_consolidator_agent import generate_json, publish_to_api
+
+        report_output = generate_json(conformance_report, [], [])
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("conexão recusada", request=request)
+
+        client = httpx.Client(base_url=settings.api_url, transport=httpx.MockTransport(handler))
+
+        with capture_logs() as logs:
+            publish_to_api(settings, report_output, client=client)  # não deve levantar
+
+        eventos_erro = [log for log in logs if log.get("log_level") == "error"]
+        assert any(conformance_report.report_id in str(log) for log in eventos_erro)
+
+    def test_consolidate_and_publish_preserva_artefatos_quando_api_indisponivel(
+        self, settings, object_store, conformance_report, normativos, regras
+    ) -> None:
+        from pix_compliance.agents.report_consolidator_agent import consolidate_and_publish
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("conexão recusada", request=request)
+
+        client = httpx.Client(base_url=settings.api_url, transport=httpx.MockTransport(handler))
+
+        resultado = consolidate_and_publish(
+            settings, object_store, conformance_report, normativos, regras, client=client
+        )
+
+        assert Path(resultado.json_path).exists()
+        assert Path(resultado.pdf_path).exists()
+        # artefatos também persistidos no ObjectStore, apesar da falha de publicação
+        object_store.download(f"reports/{conformance_report.report_id}.json")
+        object_store.download(f"reports/{conformance_report.report_id}.pdf")
+
+
+class TestSkillMd:
+    def test_skill_md_menciona_requisito_do_desafio(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        conteudo = (repo_root / "skills" / "report-consolidator-skill" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        assert "## Responsabilidade" in conteudo
+        assert "## Ferramentas" in conteudo
+        assert "## Input" in conteudo
+        assert "## Output" in conteudo
+        assert "API FastAPI" in conteudo
+        assert "cliente HTTP" in conteudo

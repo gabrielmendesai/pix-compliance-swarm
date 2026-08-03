@@ -256,3 +256,41 @@ necessidade concreta (Princípio II, YAGNI). Ver
 python -m pix_compliance.agents.knowledge_builder_agent fixtures/normativos.json
 pytest tests/test_knowledge_builder_agent.py -q
 ```
+
+## Report Consolidator Agent (`src/pix_compliance/agents/report_consolidator_agent.py`)
+
+**Este é o agente que cumpre, de forma literal e verificável, o requisito
+nominal da seção 2 do desafio técnico original: "invocar uma API FastAPI
+como cliente HTTP para ação final".** A função `publish_to_api` é o cliente
+HTTP que faz essa chamada, usando exclusivamente `settings.api_url` como
+fonte da URL — nunca um literal no código-fonte deste agente.
+
+Consolida o resultado do pipeline em dois artefatos: um JSON no formato
+`ReportOutput` (SPEC-002) e um PDF via `reportlab`, com cinco seções (capa,
+sumário executivo, tabela de normativos coletados, regras agrupadas por
+categoria, gap analysis com severidade). Ambos são enviados ao `ObjectStore`
+(SPEC-006) antes de qualquer tentativa de publicação HTTP — a persistência
+local e no `ObjectStore` nunca depende do sucesso da chamada de rede.
+
+Quando a API está indisponível (erro de conexão), o agente aplica
+**degradação controlada**: os artefatos já gerados permanecem persistidos, e
+o erro é logado de forma clara via `structlog` — o trabalho de geração do
+relatório nunca é perdido só porque a publicação HTTP falhou. Apenas falhas
+de transporte (`httpx.TransportError`) acionam essa degradação; erros de
+aplicação retornados pela própria API (HTTP 4xx/5xx) propagam normalmente,
+por indicarem um bug real de integração, não indisponibilidade transitória.
+
+Diferente dos demais agentes do enxame (SPEC-008/009/010), não instancia
+`pydantic_ai.Agent` — mesma situação do Knowledge Builder (SPEC-012): não há
+decisão de LLM aqui, apenas consolidação determinística de dados e I/O.
+SPEC-011 (Conformance Validator) e SPEC-013 (API FastAPI) ainda não existem
+como código neste repositório — este agente foi implementado e testado
+contra os contratos já congelados (`ConformanceReport`/`ReportOutput`,
+SPEC-002) e um cliente HTTP mock (`httpx.MockTransport`), sem depender da
+implementação real de nenhuma das duas. Ver
+`skills/report-consolidator-skill/SKILL.md`.
+
+```bash
+python -m pix_compliance.agents.report_consolidator_agent
+pytest tests/test_report_consolidator_agent.py -q
+```

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     object_storage_secret_key: SecretStr
     object_storage_bucket: str
 
+    # SPEC-007: alvo de coleta do scraper (site mock do BCB por padrão) e
+    # host/porta do servidor MCP (transporte SSE). Trocar apenas
+    # bcb_base_url é o único passo necessário para apontar a um alvo real
+    # no futuro (Fetcher é agnóstico à origem; ver adapters.py).
+    bcb_base_url: str
+    mcp_scraper_host: str
+    mcp_scraper_port: int
+
     @property
     def embedding_dimension(self) -> int:
         """Dimensão do vetor de embedding, travada em `EMBEDDING_DIMENSION`

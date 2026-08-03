@@ -14,6 +14,9 @@ REQUIRED_ENV = {
     "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
     "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
     "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
+    "BCB_BASE_URL": "http://localhost:8080",
+    "MCP_SCRAPER_HOST": "127.0.0.1",
+    "MCP_SCRAPER_PORT": "8100",
 }
 
 

@@ -11,6 +11,9 @@ REQUIRED_ENV = {
     "API_URL": "http://localhost:8000",
     "POSTGRES_DSN": "postgresql://user:pass@localhost:5432/pix",
     "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
+    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
+    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
+    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
 }
 
 
@@ -78,6 +81,20 @@ def test_settings_parses_comma_separated_fallback_model_ids(monkeypatch):
         "modelo-b",
         "modelo-c",
     ]
+
+
+def test_settings_embedding_dimension_is_locked_to_512(monkeypatch):
+    for key, value in REQUIRED_ENV.items():
+        monkeypatch.setenv(key, value)
+    # Mesmo se alguém definir uma env var homônima, o valor não deve mudar —
+    # embedding_dimension é constante de módulo, não campo de env (SPEC-006).
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "1536")
+
+    from pix_compliance.config import Settings
+
+    settings = Settings(_env_file=None)
+
+    assert settings.embedding_dimension == 512
 
 
 def test_settings_raises_actionable_error_when_llm_provider_invalid(monkeypatch):

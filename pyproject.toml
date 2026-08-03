@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-ai-slim[bedrock]>=0.0.1",
     "anthropic[bedrock]>=0.40",
     "tenacity>=8.0",
+    "psycopg[binary]>=3.1",
+    "pgvector>=0.3",
 ]
 
 [project.optional-dependencies]

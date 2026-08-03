@@ -118,3 +118,33 @@ uma "chave de API do Claude" separada.
 Embeddings Titan não têm equivalente no SDK `anthropic` —
 `BedrockEmbeddingsProvider` continua na superfície legada
 (`boto3`/`invoke_model`), que é a única forma de invocar Titan.
+
+## Camada de armazenamento (`src/pix_compliance/object_store.py`, `src/pix_compliance/vector_store.py`)
+
+`ObjectStore` (`Protocol`, implementado por `S3ObjectStore`) persiste
+artefatos binários via `boto3`/S3 — a mesma classe serve MinIO local (padrão
+de desenvolvimento) e S3 real trocando apenas `OBJECT_STORAGE_ENDPOINT`.
+`PgVectorStore` (classe concreta, sem `Protocol` — única implementação de
+vector store deste projeto, ver ADR-01 em `docs/architecture.md`) persiste
+vetores de embedding (dimensão 512, travada em `EMBEDDING_DIMENSION` em
+`config.py`, herdada da SPEC-005) sobre PostgreSQL/`pgvector`.
+
+### Subir o ambiente local
+
+```bash
+docker compose up postgres minio -d
+```
+
+Depois de os serviços subirem, aplique a migration que cria o schema do
+vector store (idempotente — usa `IF NOT EXISTS`):
+
+```bash
+docker compose exec -T postgres psql -U pix -d pix_compliance -f - < migrations/0001_create_vector_store_schema.sql
+```
+
+Rodar a suíte de armazenamento contra os serviços reais (sem mock, conforme
+Princípio VIII da constituição):
+
+```bash
+pytest tests/test_object_store.py tests/test_vector_store.py tests/test_no_orphan_abstractions.py -q
+```

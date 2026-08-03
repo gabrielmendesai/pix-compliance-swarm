@@ -10,6 +10,14 @@ from typing import Literal
 from pydantic import SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Dimensão do vetor gerado pelo Titan Text Embeddings V2
+# (amazon.titan-embed-text-v2:0), decisão já tomada na SPEC-005. Travada como
+# constante de módulo (não como campo de Settings lido de env var) para que
+# nenhuma configuração de ambiente possa divergir do schema já criado pela
+# migration do pgvector (migrations/0001_create_vector_store_schema.sql,
+# SPEC-006) — é o mesmo número dos dois lados, sempre.
+EMBEDDING_DIMENSION = 512
+
 
 class ConfigurationError(Exception):
     """Erro de configuração com mensagem acionável para quem sobe o projeto.
@@ -39,6 +47,15 @@ class Settings(BaseSettings):
     api_url: str
     postgres_dsn: str
     object_storage_endpoint: str
+    object_storage_access_key: str
+    object_storage_secret_key: SecretStr
+    object_storage_bucket: str
+
+    @property
+    def embedding_dimension(self) -> int:
+        """Dimensão do vetor de embedding, travada em `EMBEDDING_DIMENSION`
+        (constante de módulo, não configurável por env var)."""
+        return EMBEDDING_DIMENSION
 
     def __init__(self, **kwargs: object) -> None:
         try:

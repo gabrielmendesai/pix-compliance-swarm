@@ -1,19 +1,17 @@
 <!--
 Sync Impact Report
-- Version change: N/A (template, unfilled) → 1.0.0
-- Modified principles: n/a (initial ratification)
+- Version change: 1.0.0 → 1.1.0
+- Modified principles: nenhum dos oito princípios anteriores foi alterado
 - Added sections:
-  - Core Principles I–VIII (Bedrock como caminho padrão; YAGNI; KISS; SRP por agente;
-    Guardrail único; Contrato antes de comportamento; Comentários e nomenclatura;
-    Evidência como entregável)
-  - Contexto do Projeto e Stack Técnica (Section 2)
-  - Governance (incluindo regra de resolução de conflito)
-- Removed sections: nenhuma (primeira ratificação a partir do template)
+  - Core Principle IX (Testes escritos antes da implementação, a partir do contrato,
+    nunca do código)
+- Removed sections: nenhuma
 - Templates requiring follow-up:
-  - .specify/templates/plan-template.md ⚠ pending manual check (não lido nesta execução —
-    validar que o "Constitution Check" referencia os 8 princípios acima)
+  - .specify/templates/plan-template.md ⚠ pending manual check (validar que o
+    "Constitution Check" passa a referenciar os 9 princípios acima)
   - .specify/templates/spec-template.md ⚠ pending manual check (não lido nesta execução)
-  - .specify/templates/tasks-template.md ⚠ pending manual check (não lido nesta execução)
+  - .specify/templates/tasks-template.md ⚠ pending manual check (validar que a ordenação
+    de tarefas — teste antes de implementação por user story — reflete o Princípio IX)
   - .specify/templates/checklist-template.md ⚠ pending manual check (não lido nesta execução)
 - Deferred TODOs: nenhum — todos os campos foram preenchidos com conteúdo fornecido pelo usuário.
 -->
@@ -97,6 +95,19 @@ evidência (screenshots, logs de execução) são produzidos durante o desenvolv
 cada spec, não reconstruídos ao final. Todo critério de aceite é um comando executável
 ou um teste automatizado — nunca um julgamento subjetivo.
 
+### IX. Testes escritos antes da implementação, a partir do contrato, nunca do código
+
+Para toda feature com critérios de aceite verificáveis por teste, os arquivos de teste
+são escritos e revisados antes de qualquer código de produção correspondente existir.
+Os testes derivam exclusivamente dos contratos já definidos em `spec.md`,
+`data-model.md` e `contracts/` daquela feature — nunca são escritos olhando para uma
+implementação já pronta, o que os tornaria uma confirmação enviesada em vez de uma
+verificação independente. A ordem de trabalho dentro de cada tarefa de implementação é:
+escrever o teste que define o comportamento esperado, confirmar que ele falha (porque o
+código ainda não existe ou ainda não satisfaz o contrato), só então escrever a
+implementação até o teste passar. Ao gerar `tasks.md`, as tarefas de teste de cada user
+story devem preceder as tarefas de implementação correspondentes, não vir depois delas.
+
 ## Contexto do Projeto e Stack Técnica
 
 O PIX Compliance Swarm é um enxame de 7 agentes Pydantic AI para compliance de
@@ -124,8 +135,8 @@ plans e tasks em andamento permanecem compatíveis com o texto emendado, ou atua
 explícita deles.
 
 Toda spec, plan e tasks gerados a partir deste projeto DEVEM ser revisados quanto à
-conformidade com os oito princípios acima antes de merge. Complexidade adicional
+conformidade com os nove princípios acima antes de merge. Complexidade adicional
 (nova abstração, novo módulo, novo agente) deve ser justificada por escrito em relação
 aos Princípios II, III e IV.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-30 | **Last Amended**: 2026-07-30
+**Version**: 1.1.0 | **Ratified**: 2026-07-30 | **Last Amended**: 2026-08-03

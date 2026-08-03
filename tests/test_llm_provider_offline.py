@@ -14,6 +14,9 @@ REQUIRED_ENV = {
     "API_URL": "http://localhost:8000",
     "POSTGRES_DSN": "postgresql://user:pass@localhost:5432/pix",
     "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
+    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
+    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
+    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
 }
 
 

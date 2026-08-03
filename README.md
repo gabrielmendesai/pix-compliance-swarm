@@ -218,6 +218,35 @@ python -m pix_compliance.agents.compliance_analyzer_agent fixtures/normativos.js
 pytest tests/test_compliance_analyzer_agent.py -q
 ```
 
+## Conformance Validator Agent (`src/pix_compliance/agents/conformance_validator_agent.py`)
+
+Produz o gap analysis (SPEC-011): compara semanticamente as `RegraExtraida`
+(SPEC-010) da versão atual e da versão imediatamente anterior do mesmo
+normativo, classificando cada regra em `novo`, `alterado`, `revogado` ou
+`conforme` (`StatusConformidade`, SPEC-002). A comparação é feita por
+julgamento do LLM — não por diff textual bruto nem por similaridade de
+embeddings — porque reconhecer que "prazo de 90 dias" virou "prazo de 180
+dias" é uma alteração de significado, o tipo de julgamento que um LLM
+estruturado resolve de forma confiável e um diff de string ou um limiar
+numérico não. Quando um normativo não tem versão anterior, suas regras são
+`novo`, resolvido inteiramente em código, sem nenhuma chamada ao LLM. `guard()`
+(SPEC-004) é reaplicado sobre cada `enunciado` antes de qualquer chamada ao
+LLM, mesmo padrão de defesa em profundidade do Compliance Analyzer. Ver
+`skills/conformance-validator-skill/SKILL.md`.
+
+**Nota de implementação fora de ordem**: esta é a SPEC-011 do catálogo do
+projeto — deveria ter sido implementada antes da SPEC-012 (Knowledge
+Builder) e da SPEC-014 (Report Consolidator), mas foi pulada por engano e
+implementada depois, fora de ordem. **Pendência registrada**:
+`report_consolidator_agent.py` (SPEC-014) foi implementado antes desta
+feature existir e ainda não consome o `ConformanceReport` real produzido
+aqui — essa revisão fica para uma spec/tarefa futura própria.
+
+```bash
+python -m pix_compliance.agents.conformance_validator_agent fixtures/normativos.json
+pytest tests/test_conformance.py -q
+```
+
 ## Knowledge Builder Agent (`src/pix_compliance/agents/knowledge_builder_agent.py`)
 
 Indexa `NormativoItem` no `PgVectorStore` (SPEC-006) e serve busca semântica

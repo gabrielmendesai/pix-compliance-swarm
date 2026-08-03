@@ -43,6 +43,12 @@ app = FastAPI(
         {"name": "search", "description": "Busca semântica (RAG) via Knowledge Builder Agent."},
         {"name": "health", "description": "Checagem de saúde e conectividade com dependências."},
         {"name": "runs", "description": "Disparo de execuções ad-hoc do pipeline completo."},
+        {
+            "name": "reports",
+            "description": (
+                "Recebimento de relatórios consolidados publicados pelo Report Consolidator Agent."
+            ),
+        },
     ],
 )
 

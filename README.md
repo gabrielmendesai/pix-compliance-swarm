@@ -344,6 +344,17 @@ agentes já existentes.
 | `GET /search?query=...&top_k=...` | Busca semântica via Knowledge Builder Agent (SPEC-012) |
 | `GET /health` | Conectividade com `ObjectStore`/`PgVectorStore` — nunca retorna 500 por dependência indisponível, reporta `"degraded"` |
 | `POST /runs` | Dispara, sincronamente, Compliance Analyzer → Conformance Validator → Knowledge Builder → Report Consolidator sobre o corpus mock, retornando `PipelineResult` já completo |
+| `POST /reports` | Recebe/reconhece o `ReportOutput` publicado pelo Report Consolidator Agent (SPEC-014) — adicionada durante a revisão de integração entre as duas specs, ver nota abaixo |
+
+**Nota de integração**: `POST /reports` foi adicionada após a implementação
+inicial desta spec, quando a revisão de integração com o Report
+Consolidator Agent (SPEC-014) constatou que `publish_to_api` sempre apontou
+para esse endpoint, mas ele nunca havia sido implementado (a lista original
+de rotas desta spec não o incluía). É o endpoint real de recebimento do
+relatório final consolidado — fecha, de fato, o requisito literal do
+desafio original de "invocar uma API FastAPI como cliente HTTP para ação
+final" (ver `specs/013-api-fastapi/spec.md`, Adendo, e
+`specs/013-api-fastapi/contracts/api.md`).
 
 Todo `response_model` reaproveita um modelo já definido na SPEC-002 —
 nenhum schema de resposta duplicado. Toda falha (validação, recurso não

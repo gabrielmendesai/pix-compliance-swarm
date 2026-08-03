@@ -77,7 +77,28 @@ Analyzer → Conformance Validator → Knowledge Builder (indexação) → Repor
 Consolidator. Grava `reports/<report_id>.conformance.json` (data-model.md)
 antes de retornar. Erros de qualquer etapa são capturados e refletidos em
 `PipelineResult.sucesso=False`/`erro=<mensagem>`, não uma exceção não
-tratada (edge case de spec.md).
+tratada (edge case de spec.md). Ao final, o Report Consolidator (SPEC-014)
+publica o `ReportOutput` via HTTP em `POST /reports` (abaixo) — uma chamada
+autorreferente do processo da API a si mesmo.
+
+## `POST /reports`
+
+**Adicionado pós-implementação inicial** — ver spec.md, Adendo. Endpoint
+real de destino do cliente HTTP do Report Consolidator Agent (SPEC-014),
+que não existia na lista original de rotas desta spec.
+
+**Request body**: `ReportOutput`.
+
+**Response 200**: `ReportOutput` — o mesmo corpo recebido é devolvido como
+confirmação (nenhum reprocessamento; a única responsabilidade desta rota é
+reconhecer o recebimento e logar `api_relatorio_recebido`).
+
+**Response 422**: `ErrorResponse` — corpo malformado.
+
+**Comportamento**: Loga o recebimento (`json_path`, `pdf_path`,
+`total_gaps`) via `structlog` e devolve o `ReportOutput` recebido. Não
+persiste nada por conta própria — o Report Consolidator já gravou os
+artefatos (local e `ObjectStore`) antes desta chamada.
 
 ## Exception handlers globais
 

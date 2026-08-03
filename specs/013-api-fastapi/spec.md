@@ -15,6 +15,16 @@ um agente do enxame. `src/pix_compliance/agents/report_consolidator_agent.py`
 (SPEC-014, já implementado) é **cliente** desta API (`settings.api_url`); esta
 spec é quem finalmente implementa o **servidor** do outro lado dessa chamada.
 
+**Adendo pós-implementação**: durante a revisão de integração entre esta
+feature e o Report Consolidator Agent (SPEC-014), verificou-se que
+`publish_to_api` (SPEC-014) sempre apontou para `POST /reports` — endpoint
+que não fazia parte da lista original de rotas desta spec. Foi adicionado
+`POST /reports` a esta implementação como o endpoint real de recebimento do
+relatório final consolidado (recebe/reconhece um `ReportOutput`, SPEC-002,
+sem reprocessar nada — a única forma de fechar de fato a integração
+cliente/servidor entre as duas specs). Ver `contracts/api.md` para o
+contrato completo desta rota.
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--

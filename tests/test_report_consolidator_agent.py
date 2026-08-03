@@ -300,6 +300,79 @@ class TestDegradacaoControlada:
         object_store.download(f"reports/{conformance_report.report_id}.pdf")
 
 
+class TestIntegracaoConformanceValidatorEApiReal:
+    """Prova que o agente funciona ponta a ponta contra as duas peças que
+    faltavam no momento da implementação original (SPEC-014 foi
+    implementado antes de SPEC-011/SPEC-013 existirem, research.md,
+    Decisão 0): um `ConformanceReport` produzido pelo Conformance Validator
+    Agent de verdade (não construído à mão), publicado via HTTP contra a
+    API FastAPI real (não `httpx.MockTransport`) — `fastapi.testclient.
+    TestClient` é uma subclasse de `httpx.Client`, compatível com o
+    parâmetro `client` já existente de `publish_to_api`/
+    `consolidate_and_publish`, sem exigir nenhum servidor real escutando em
+    porta."""
+
+    def test_conformance_report_real_e_publicado_na_api_real(
+        self, settings, object_store, normativos, regras
+    ) -> None:
+        from fastapi.testclient import TestClient
+        from structlog.testing import capture_logs
+
+        from pix_compliance.agents.conformance_validator_agent import build_conformance_report
+        from pix_compliance.agents.report_consolidator_agent import consolidate_and_publish
+        from pix_compliance.api.app import app
+
+        # Nenhum normativo aqui tem versão anterior — build_conformance_report
+        # classifica tudo como "novo" deterministicamente, sem chamar LLM
+        # (SPEC-011, research.md Decisão 4) — cenário 100% real, sem
+        # FunctionModel nem dado hand-typed no meio do caminho.
+        regras_por_normativo = {
+            "norm-tarifas": [regras[0]],
+            "norm-seguranca": [regras[1]],
+        }
+        conformance_report_real = build_conformance_report(
+            settings, "report-integracao-real", normativos, regras_por_normativo
+        )
+
+        assert all(item.status.value == "novo" for item in conformance_report_real.itens)
+
+        with TestClient(app) as test_client, capture_logs() as logs:
+            resultado = consolidate_and_publish(
+                settings,
+                object_store,
+                conformance_report_real,
+                normativos,
+                regras,
+                client=test_client,
+            )
+
+        eventos_erro = [log for log in logs if log.get("log_level") == "error"]
+        assert eventos_erro == [], "publicação contra a API real não deveria falhar"
+
+        eventos_recebimento = [
+            log for log in logs if log.get("event") == "api_relatorio_recebido"
+        ]
+        assert len(eventos_recebimento) == 1
+        assert eventos_recebimento[0]["json_path"] == resultado.json_path
+
+    def test_publish_to_api_via_test_client_real_recebe_200(
+        self, settings, conformance_report
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from pix_compliance.agents.report_consolidator_agent import generate_json, publish_to_api
+        from pix_compliance.api.app import app
+
+        report_output = generate_json(conformance_report, [], [])
+
+        with TestClient(app) as test_client:
+            resposta = test_client.post("/reports", json=report_output.model_dump(mode="json"))
+            publish_to_api(settings, report_output, client=test_client)
+
+        assert resposta.status_code == 200
+        assert resposta.json()["json_path"] == report_output.json_path
+
+
 class TestSkillMd:
     def test_skill_md_menciona_requisito_do_desafio(self) -> None:
         repo_root = Path(__file__).resolve().parent.parent

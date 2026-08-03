@@ -264,6 +264,35 @@ def test_post_runs_corpo_invalido_retorna_422(client) -> None:
     assert "correlation_id" in resposta.json()
 
 
+# --- POST /reports -----------------------------------------------------
+# Destino real do cliente HTTP do Report Consolidator Agent (SPEC-014) —
+# antes desta rota existir, publish_to_api() apontava para um endpoint que
+# nunca foi de fato implementado pela API (SPEC-013).
+
+
+def test_post_reports_recebe_e_devolve_report_output(client) -> None:
+    corpo_envio = {
+        "json_path": "reports/x.json",
+        "pdf_path": "reports/x.pdf",
+        "total_normativos": 1,
+        "total_regras": 1,
+        "total_gaps": 0,
+        "gerado_em": "2024-01-01T00:00:00",
+    }
+
+    resposta = client.post("/reports", json=corpo_envio)
+
+    assert resposta.status_code == 200
+    assert resposta.json()["json_path"] == "reports/x.json"
+
+
+def test_post_reports_corpo_invalido_retorna_422(client) -> None:
+    resposta = client.post("/reports", json={"json_path": "reports/x.json"})
+
+    assert resposta.status_code == 422
+    assert "correlation_id" in resposta.json()
+
+
 # --- Erros estruturados e OpenAPI substantivo -------------------------------
 
 
@@ -319,6 +348,7 @@ def test_openapi_schema_tem_descricao_e_exemplo_em_toda_rota(client) -> None:
         ("/search", "get"),
         ("/health", "get"),
         ("/runs", "post"),
+        ("/reports", "post"),
     }
     for caminho, metodo in rotas_esperadas:
         operacao = schema["paths"][caminho][metodo]

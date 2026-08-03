@@ -41,6 +41,7 @@ from pix_compliance.models import (
     PipelineRequest,
     PipelineResult,
     RegraExtraida,
+    ReportOutput,
     SearchQuery,
     SearchResult,
 )
@@ -217,6 +218,39 @@ def get_health(settings: SettingsDep) -> dict:
 
     status_geral = "ok" if all(v == "ok" for v in dependencies.values()) else "degraded"
     return {"status": status_geral, "dependencies": dependencies}
+
+
+@router.post(
+    "/reports",
+    tags=["reports"],
+    summary="Recebe a publicação de um relatório consolidado",
+    description=(
+        "Destino real do cliente HTTP do Report Consolidator Agent "
+        "(SPEC-014) — o endpoint que fecha, de forma literal e "
+        "verificável, o requisito do desafio original de 'invocar uma "
+        "API FastAPI como cliente HTTP para ação final'. Reconhece o "
+        "recebimento do `ReportOutput` já consolidado; não reprocessa nem "
+        "revalida o relatório (isso é responsabilidade exclusiva do "
+        "Report Consolidator, que já gerou e persistiu os artefatos antes "
+        "desta chamada)."
+    ),
+    response_model=ReportOutput,
+    responses={
+        200: {
+            "description": (
+                "Relatório recebido — o mesmo `ReportOutput` enviado é devolvido como confirmação."
+            )
+        }
+    },
+)
+def post_reports(report_output: ReportOutput) -> ReportOutput:
+    logger.info(
+        "api_relatorio_recebido",
+        json_path=report_output.json_path,
+        pdf_path=report_output.pdf_path,
+        total_gaps=report_output.total_gaps,
+    )
+    return report_output
 
 
 def _run_pipeline_sync(settings: Settings, request: PipelineRequest) -> PipelineResult:

@@ -138,6 +138,20 @@ class TestRegraExtraida:
         with pytest.raises(ValidationError):
             RegraExtraida(**_regra_valida(confianca=-0.1))
 
+    def test_revisao_humana_necessaria_default_e_false(self):
+        regra = RegraExtraida(**_regra_valida())
+        assert regra.revisao_humana_necessaria is False
+
+    def test_revisao_humana_necessaria_roundtrip_sem_perda(self):
+        regra = RegraExtraida(**_regra_valida(revisao_humana_necessaria=True))
+        dump = regra.model_dump()
+        assert RegraExtraida.model_validate(dump) == regra
+        assert dump["revisao_humana_necessaria"] is True
+
+    def test_regra_extraida_extra_field_e_rejeitado(self):
+        with pytest.raises(ValidationError):
+            RegraExtraida(**_regra_valida(foo="bar"))
+
 
 class TestConformanceItemReport:
     def test_conformance_report_agrega_itens_corretamente(self):

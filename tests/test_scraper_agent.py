@@ -34,6 +34,8 @@ REQUIRED_ENV = {
     "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
     "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
     "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
+    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
+    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
 }
 
 SKILL_MD_PATH = Path(__file__).resolve().parent.parent / "skills" / "scraper-skill" / "SKILL.md"

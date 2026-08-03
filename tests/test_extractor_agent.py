@@ -31,6 +31,8 @@ REQUIRED_ENV = {
     "BCB_BASE_URL": "http://localhost:8080",
     "MCP_SCRAPER_HOST": "127.0.0.1",
     "MCP_SCRAPER_PORT": "8100",
+    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
+    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
 }
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "documents"

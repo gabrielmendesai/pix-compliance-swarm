@@ -193,3 +193,27 @@ do Pydantic — nunca uma terceira tentativa. PDF corrompido/malformado gera
 python -m pix_compliance.agents.extractor_agent <object_store_key> <content_type>
 pytest tests/test_extractor_agent.py -q
 ```
+
+## Compliance Analyzer Agent (`src/pix_compliance/agents/compliance_analyzer_agent.py`)
+
+Terceiro agente do enxame (SPEC-010), reaproveitando o mesmo padrão
+estrutural das SPEC-008/009. Categoriza as regras de compliance de um
+`NormativoItem` nas seis dimensões do desafio original (participantes,
+tarifas, liquidação, segurança, SLA, interoperabilidade), com um system
+prompt que define operacionalmente cada categoria para reduzir ambiguidade
+entre pares próximos (ex. participantes vs. interoperabilidade).
+
+Processa lotes concorrentemente, com um `asyncio.Semaphore` limitando o
+número de chamadas simultâneas ao LLM a
+`COMPLIANCE_ANALYZER_MAX_CONCURRENCY` (custo e rate limit do Bedrock, não só
+performance). Cada `RegraExtraida` tem `revisao_humana_necessaria`
+recalculado deterministicamente (nunca confiado ao LLM) quando `confianca`
+cai abaixo de `COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD`. `guard()`
+(SPEC-004) é reaplicado sobre o texto de entrada antes de qualquer chamada
+ao LLM — redundância deliberada, mesmo com entrada supostamente já limpa
+vinda do Extractor Agent. Ver `skills/compliance-analyzer-skill/SKILL.md`.
+
+```bash
+python -m pix_compliance.agents.compliance_analyzer_agent fixtures/normativos.json
+pytest tests/test_compliance_analyzer_agent.py -q
+```

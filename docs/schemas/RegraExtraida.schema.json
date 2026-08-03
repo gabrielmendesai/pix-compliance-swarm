@@ -71,6 +71,11 @@
     "regra_id": {
       "title": "Regra Id",
       "type": "string"
+    },
+    "revisao_humana_necessaria": {
+      "default": false,
+      "title": "Revisao Humana Necessaria",
+      "type": "boolean"
     }
   },
   "required": [

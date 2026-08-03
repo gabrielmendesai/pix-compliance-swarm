@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     mcp_scraper_host: str
     mcp_scraper_port: int
 
+    # SPEC-010: limite de chamadas simultâneas ao LLM no processamento em
+    # lote do Compliance Analyzer Agent (custo e rate limit do Bedrock, não
+    # só performance) e limiar de confiança abaixo do qual uma regra
+    # extraída é sinalizada para revisão humana.
+    compliance_analyzer_max_concurrency: int
+    compliance_analyzer_confidence_threshold: float
+
     @property
     def embedding_dimension(self) -> int:
         """Dimensão do vetor de embedding, travada em `EMBEDDING_DIMENSION`

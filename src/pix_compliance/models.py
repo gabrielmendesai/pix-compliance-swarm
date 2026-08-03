@@ -181,6 +181,11 @@ class RegraExtraida(BaseModel):
     prazo: date | None = None
     atores_afetados: list[str] = Field(min_length=1)
     confianca: Score
+    # SPEC-010: marcação explícita, distinta do valor numérico de `confianca`
+    # — calculada deterministicamente pelo Compliance Analyzer Agent
+    # (confianca < limiar configurado), nunca deixada para o consumidor da
+    # saída interpretar um número sozinho.
+    revisao_humana_necessaria: bool = False
 
     @field_validator("categoria", mode="before")
     @classmethod

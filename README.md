@@ -170,3 +170,26 @@ pelos agentes seguintes.
 python -m pix_compliance.agents.scraper_agent
 pytest tests/test_scraper_agent.py -q
 ```
+
+## Extractor Agent (`src/pix_compliance/agents/extractor_agent.py`)
+
+Segundo agente do enxame (SPEC-009), reaproveitando o mesmo padrão
+estrutural do Scraper Agent. Converte um documento bruto (PDF/HTML,
+referenciado por chave no `ObjectStore`) em `NormativoItem` validado, em
+dois passos: extração de texto **determinística** (`pdfplumber` para PDF,
+`BeautifulSoup` para HTML — nunca delegada ao LLM), seguida de `guard()`
+(SPEC-004) sobre o texto extraído e só então estruturação via LLM apenas dos
+campos ambíguos que a extração não resolveu sozinha.
+
+Um loop de reparo de validação, escrito explicitamente (não o retry
+automático do Pydantic AI) e instrumentado com log estruturado por
+tentativa, tenta no máximo duas vezes: se a primeira estruturação falhar na
+validação Pydantic, a segunda tentativa recebe a mensagem de erro específica
+do Pydantic — nunca uma terceira tentativa. PDF corrompido/malformado gera
+`PdfExtractionError`, nunca a exceção crua de `pdfplumber`. Ver
+`skills/extractor-skill/SKILL.md`.
+
+```bash
+python -m pix_compliance.agents.extractor_agent <object_store_key> <content_type>
+pytest tests/test_extractor_agent.py -q
+```

@@ -312,14 +312,71 @@ por indicarem um bug real de integração, não indisponibilidade transitória.
 Diferente dos demais agentes do enxame (SPEC-008/009/010), não instancia
 `pydantic_ai.Agent` — mesma situação do Knowledge Builder (SPEC-012): não há
 decisão de LLM aqui, apenas consolidação determinística de dados e I/O.
-SPEC-011 (Conformance Validator) e SPEC-013 (API FastAPI) ainda não existem
-como código neste repositório — este agente foi implementado e testado
-contra os contratos já congelados (`ConformanceReport`/`ReportOutput`,
-SPEC-002) e um cliente HTTP mock (`httpx.MockTransport`), sem depender da
-implementação real de nenhuma das duas. Ver
-`skills/report-consolidator-skill/SKILL.md`.
+Este agente foi implementado (SPEC-014) antes de SPEC-011 (Conformance
+Validator) e SPEC-013 (API FastAPI) existirem como código, testado contra
+os contratos já congelados (`ConformanceReport`/`ReportOutput`, SPEC-002) e
+um cliente HTTP mock (`httpx.MockTransport`) — hoje ambas já existem, mas
+**este agente ainda não foi revisado** para receber o `ConformanceReport`
+real produzido pelo Conformance Validator em vez de um construído
+manualmente pelo chamador; essa revisão continua registrada como pendência
+para uma spec/tarefa futura própria (a API FastAPI, SPEC-013, resolve essa
+lacuna por outro caminho: `POST /runs` monta o `ConformanceReport` real e
+persiste em `reports/<id>.conformance.json` para `GET /compliance`, sem
+depender dessa revisão). Ver `skills/report-consolidator-skill/SKILL.md`.
 
 ```bash
 python -m pix_compliance.agents.report_consolidator_agent
 pytest tests/test_report_consolidator_agent.py -q
+```
+
+## API FastAPI (`src/pix_compliance/api/`)
+
+Serviço HTTP documentado (SPEC-013), expondo os endpoints nominalmente
+exigidos pelo desafio original, com Swagger completo em `/docs`. Vive em
+`src/pix_compliance/api/`, deliberadamente fora de `agents/` — não é um
+agente do enxame Pydantic AI, é a camada de transporte HTTP que expõe os
+agentes já existentes.
+
+| Rota | Descrição |
+|---|---|
+| `GET /normativos` | Lista normativos coletados, paginada, com filtros por `tipo`/`categoria`/período |
+| `GET /compliance` | Gap analysis já produzido, com filtro por `severidade_min` |
+| `GET /search?query=...&top_k=...` | Busca semântica via Knowledge Builder Agent (SPEC-012) |
+| `GET /health` | Conectividade com `ObjectStore`/`PgVectorStore` — nunca retorna 500 por dependência indisponível, reporta `"degraded"` |
+| `POST /runs` | Dispara, sincronamente, Compliance Analyzer → Conformance Validator → Knowledge Builder → Report Consolidator sobre o corpus mock, retornando `PipelineResult` já completo |
+
+Todo `response_model` reaproveita um modelo já definido na SPEC-002 —
+nenhum schema de resposta duplicado. Toda falha (validação, recurso não
+encontrado, erro interno) retorna um corpo `ErrorResponse` estruturado
+(`correlation_id`, reaproveitando `pix_compliance.logging.
+bind_run_correlation_id`, SPEC-001), nunca o corpo cru default do FastAPI.
+Metadados de OpenAPI (título, descrição, versão, tags) e a descrição/
+exemplo de cada rota estão completamente preenchidos — o desafio original
+pede screenshot do Swagger como evidência formal de entrega, e um `/docs`
+com placeholder genérico não cumpre esse requisito.
+
+**Autenticação está conscientemente fora do escopo desta versão** — decisão
+deliberada, não uma lacuna esquecida: um desafio técnico de prazo curto,
+com um único operador/avaliador, não justifica a complexidade de um esquema
+de autenticação completo (sessão, OAuth2, API key) sem um requisito de
+negócio real por trás. Se este serviço evoluir para um ambiente
+multiusuário, autenticação (provavelmente API key por cliente, dado o
+perfil de consumidores HTTP-a-HTTP deste enxame) seria o próximo passo
+natural.
+
+`POST /runs` executa sincronamente (não enfileira um job em background):
+`PipelineResult` (SPEC-002, já congelado) exige `sucesso`/`concluido_em`
+preenchidos, sem um estado "pendente" representável — introduzir uma fila
+de jobs (Celery/RQ) só para viabilizar um fluxo assíncrono seria
+infraestrutura nova sem necessidade real para o volume deste projeto. A
+rota também não aciona uma coleta ao vivo via MCP scraper (SPEC-007/008) —
+isso exigiria um servidor MCP já em execução como dependência externa do
+processo da API; `POST /runs` orquestra os agentes já implementados sobre o
+corpus mock (`fixtures/normativos.json`), documentado explicitamente aqui,
+não como uma lacuna silenciosa.
+
+```bash
+uvicorn pix_compliance.api.app:app --reload
+# Swagger: http://localhost:8000/docs
+pytest tests/test_api.py -q
 ```

@@ -24,6 +24,7 @@ from pix_compliance.models import (
     RawDocument,
     RegraExtraida,
     ReportOutput,
+    ScrapeResult,
     SearchQuery,
     SearchResult,
     StatusConformidade,
@@ -257,6 +258,52 @@ class TestSearchAndReportAndPipeline:
         )
         result_dump = result.model_dump()
         assert PipelineResult.model_validate(result_dump) == result
+
+
+class TestScrapeResult:
+    """SPEC-008: saída do Scraper Agent — apenas dados de coleta, sem campo
+    de conteúdo estruturado/extraído."""
+
+    def _raw_document(self) -> RawDocument:
+        return RawDocument(
+            source_uri="https://bcb.gov.br/x",
+            content_type="text/html",
+            bytes_ref="minio://bucket/key",
+            hash_conteudo=HASH_VALIDO,
+            coletado_em=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+
+    def test_roundtrip_sem_perda(self):
+        resultado = ScrapeResult(
+            documentos=[self._raw_document()],
+            total_coletado=1,
+            executado_em=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        dump = resultado.model_dump()
+        assert ScrapeResult.model_validate(dump) == resultado
+
+    def test_lista_vazia_e_valida(self):
+        resultado = ScrapeResult(
+            documentos=[], total_coletado=0, executado_em=datetime(2024, 1, 1, tzinfo=UTC)
+        )
+        assert resultado.documentos == []
+
+    def test_extra_field_e_rejeitado(self):
+        with pytest.raises(ValidationError):
+            ScrapeResult.model_validate(
+                {
+                    "documentos": [],
+                    "total_coletado": 0,
+                    "executado_em": datetime(2024, 1, 1, tzinfo=UTC),
+                    "foo": "bar",
+                }
+            )
+
+    def test_total_coletado_negativo_e_rejeitado(self):
+        with pytest.raises(ValidationError):
+            ScrapeResult(
+                documentos=[], total_coletado=-1, executado_em=datetime(2024, 1, 1, tzinfo=UTC)
+            )
 
 
 class TestJsonSchemaExport:

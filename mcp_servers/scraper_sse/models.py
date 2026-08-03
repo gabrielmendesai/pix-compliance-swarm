@@ -31,12 +31,24 @@ class NormativoListItem(BaseModel):
 
 
 class FetchNormativoResult(BaseModel):
-    """Saída de `fetch_normativo`."""
+    """Saída de `fetch_normativo`.
+
+    Deliberadamente NÃO inclui o conteúdo bruto do documento (`ConfigDict`
+    `extra="forbid"` reforça que nenhum campo além destes é aceito). O
+    resultado de uma tool call MCP retorna ao contexto do modelo que chamou
+    a ferramenta — se o Scraper Agent (SPEC-008) decide o quê coletar sem
+    processar conteúdo (Princípio IV/V), o texto do documento (que pode
+    conter PII plantada, SPEC-003) nunca deve trafegar de volta a um LLM sem
+    antes atravessar `guard()`. Manter apenas metadados aqui evita esse
+    caminho por completo, em vez de reabrir a discussão de onde aplicar o
+    guardrail a cada nova ferramenta. Quem precisa do conteúdo integral
+    (Extractor Agent, feature futura) lê diretamente do `ObjectStore` pela
+    chave em `object_store_key` — nesse ponto, sim, `guard()` se aplica
+    antes de qualquer envio a um LLM."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    conteudo_bruto: str
     hash_sha256: str
     object_store_key: str
 

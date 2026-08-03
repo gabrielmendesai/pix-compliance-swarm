@@ -31,9 +31,14 @@ def list_normativos(filtros: NormativoFilter) -> list[NormativoListItem]:
 ```python
 def fetch_normativo(id: str) -> FetchNormativoResult:
     """Coleta o conteúdo bruto de um normativo específico (via Fetcher +
-    Adapter), persiste uma cópia no ObjectStore (SPEC-006), e retorna o
-    conteúdo bruto, o hash SHA-256 e a chave de persistência. Levanta um
-    erro MCP claro se `id` não corresponder a nenhum normativo conhecido."""
+    Adapter) e persiste uma cópia no ObjectStore (SPEC-006), retornando
+    apenas metadados de confirmação (hash SHA-256, chave de persistência) —
+    NUNCA o conteúdo bruto em si (adendo pós-implementação: o resultado de
+    uma tool call MCP retorna ao contexto do modelo chamador; devolver o
+    texto completo faria PII eventualmente plantada no documento, SPEC-003,
+    trafegar a um LLM sem passar por guard(), Princípio V — ver data-model.md
+    para o detalhe completo). Levanta um erro MCP claro se `id` não
+    corresponder a nenhum normativo conhecido."""
 ```
 
 ## Ferramenta `detect_changes`
@@ -82,9 +87,9 @@ class Fetcher:
    ferramentas com seus schemas de entrada/saída (SC-001, SC-002).
 2. `list_normativos({})` sem filtro retorna todos os normativos do site mock;
    com filtro, retorna apenas o subconjunto correspondente.
-3. `fetch_normativo(id)` para um `id` conhecido retorna o conteúdo bruto
-   correspondente ao fixture de origem, e uma cópia é persistida no
-   `ObjectStore`.
+3. `fetch_normativo(id)` para um `id` conhecido retorna metadados de
+   confirmação (hash, chave de persistência — nunca o conteúdo bruto), e uma
+   cópia idêntica ao fixture de origem é persistida no `ObjectStore`.
 4. `fetch_normativo(id)` para um `id` inexistente retorna um erro MCP claro.
 5. `detect_changes()` chamado duas vezes seguidas sem alteração no site mock
    retorna lista vazia nas duas vezes; após alterar um fixture, retorna o

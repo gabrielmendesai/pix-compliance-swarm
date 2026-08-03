@@ -65,7 +65,10 @@ async def main():
             )
             print(result.structuredContent["result"])
 
-            # fetch_normativo — conteúdo bruto + persistência no ObjectStore
+            # fetch_normativo — persiste no ObjectStore, retorna só metadados
+            # (hash, chave de persistência) — nunca o conteúdo bruto em si,
+            # para que texto de documento nunca volte ao contexto de um LLM
+            # sem passar por guard() (Princípio V; ver nota abaixo)
             result = await session.call_tool(
                 "fetch_normativo", {"id": "normativo-101-2021-v1"}
             )
@@ -83,7 +86,7 @@ asyncio.run(main())
 | Ferramenta | Entrada | Saída |
 |---|---|---|
 | `list_normativos` | `NormativoFilter` (`categoria`, `numero`, ambos opcionais) | `list[NormativoListItem]` |
-| `fetch_normativo` | `id: str` | `FetchNormativoResult` (conteúdo bruto, hash, chave no ObjectStore) |
+| `fetch_normativo` | `id: str` | `FetchNormativoResult` (hash, chave no ObjectStore — nunca o conteúdo bruto, ver nota abaixo) |
 | `detect_changes` | `since: datetime \| None` | `list[ChangeRecord]` |
 
 Schemas completos (JSON Schema) descobertos via `session.list_tools()` —
@@ -98,6 +101,20 @@ case-insensitive: `numero` contra o identificador (derivado do nome do
 arquivo, ex. `normativo-101-2021-v1`), e `categoria` contra o título
 coletado (o gerador de fixtures da SPEC-003 embute a categoria como sufixo
 do título, ex. "... sobre liquidação").
+
+### Nota sobre `fetch_normativo` nunca retornar o conteúdo bruto
+
+O resultado de uma tool call MCP retorna ao contexto do modelo que chamou a
+ferramenta — se `fetch_normativo` devolvesse o texto completo do documento
+(que pode conter PII plantada, SPEC-003), esse texto trafegaria a um LLM
+consumidor (ex. Scraper Agent, SPEC-008) sem antes atravessar `guard()`
+(Princípio V), mesmo que quem chamou a ferramenta não "processe" o conteúdo
+semanticamente — a regra do guardrail é sobre qualquer texto que chegue a um
+LLM, não sobre texto interpretado deliberadamente. Por isso
+`FetchNormativoResult` traz apenas hash e chave de persistência; quem
+precisa do conteúdo integral (Extractor Agent, feature futura) lê
+diretamente do `ObjectStore` — nesse ponto, `guard()` se aplica antes de
+qualquer envio a um LLM.
 
 ## Nota de arquitetura: Fetcher vs. Adapter, e a exceção ao Princípio II
 

@@ -148,3 +148,25 @@ Princípio VIII da constituição):
 ```bash
 pytest tests/test_object_store.py tests/test_vector_store.py tests/test_no_orphan_abstractions.py -q
 ```
+
+## Scraper Agent (`src/pix_compliance/agents/scraper_agent.py`)
+
+Primeiro agente Pydantic AI do enxame (SPEC-008) — estabelece o padrão
+estrutural (`deps_type`, `RunContext`, `output_type`, tratamento de erro de
+dependência externa) que os seis agentes seguintes reutilizam. Decide o quê
+coletar (`list_normativos`/`detect_changes`) e coleta (`fetch_normativo`)
+inteiramente através do toolset MCP do servidor da SPEC-007 — nunca por
+import direto de função —, sem nenhuma lógica de parsing de HTML ou
+extração de campos (Princípio IV), e devolve um `ScrapeResult` validado.
+
+Uma falha de conexão com o servidor MCP aciona uma política de retry com
+backoff própria (`tenacity`), deliberadamente independente da cadeia de
+fallback de `model_id` do Bedrock (SPEC-005) — ao esgotar as tentativas,
+levanta `ScraperTransportError`, nunca a exceção crua do cliente MCP. Ver
+`skills/scraper-skill/SKILL.md` para o formato de documentação replicado
+pelos agentes seguintes.
+
+```bash
+python -m pix_compliance.agents.scraper_agent
+pytest tests/test_scraper_agent.py -q
+```

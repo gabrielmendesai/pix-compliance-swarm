@@ -1,0 +1,70 @@
+{
+  "$defs": {
+    "RawDocument": {
+      "additionalProperties": false,
+      "description": "Documento ainda não processado, capturado da fonte original.",
+      "properties": {
+        "bytes_ref": {
+          "title": "Bytes Ref",
+          "type": "string"
+        },
+        "coletado_em": {
+          "format": "date-time",
+          "title": "Coletado Em",
+          "type": "string"
+        },
+        "content_type": {
+          "title": "Content Type",
+          "type": "string"
+        },
+        "hash_conteudo": {
+          "title": "Hash Conteudo",
+          "type": "string"
+        },
+        "source_uri": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Source Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_uri",
+        "content_type",
+        "bytes_ref",
+        "hash_conteudo",
+        "coletado_em"
+      ],
+      "title": "RawDocument",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Saída do Scraper Agent (SPEC-008): apenas dados de coleta — nenhum\ncampo de conteúdo estruturado/extraído (artigo, inciso, categoria), que\né responsabilidade de uma feature futura (Extractor Agent).",
+  "properties": {
+    "documentos": {
+      "items": {
+        "$ref": "#/$defs/RawDocument"
+      },
+      "title": "Documentos",
+      "type": "array"
+    },
+    "executado_em": {
+      "format": "date-time",
+      "title": "Executado Em",
+      "type": "string"
+    },
+    "total_coletado": {
+      "minimum": 0,
+      "title": "Total Coletado",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "total_coletado",
+    "executado_em"
+  ],
+  "title": "ScrapeResult",
+  "type": "object"
+}

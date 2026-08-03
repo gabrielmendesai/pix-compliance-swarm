@@ -10,6 +10,18 @@
 
 **Dependências**: SPEC-003 (fixtures e site mock do BCB) e SPEC-006 (object storage, para persistir o bruto coletado). Não depende de Bedrock nem de nenhuma credencial AWS além do que a SPEC-006 já configurou.
 
+> **Adendo (patch pós-implementação, revisão cruzada com SPEC-008)**: a
+> User Story 3/Acceptance Scenario 3 abaixo mencionam que `fetch_normativo`
+> retorna "o conteúdo bruto" ao chamador — isso foi corrigido na
+> implementação. `FetchNormativoResult` NUNCA inclui o conteúdo bruto do
+> documento, apenas hash e chave de persistência no `ObjectStore`: o
+> resultado de uma tool call MCP retorna ao contexto do modelo que a chamou,
+> e devolver o texto completo faria PII eventualmente plantada (SPEC-003)
+> trafegar a um LLM consumidor sem passar por `guard()` (Princípio V),
+> mesmo sem processamento semântico do conteúdo por parte de quem chama.
+> Ver `data-model.md`, `contracts/scraper_mcp.md` e o código atual em
+> `mcp_servers/scraper_sse/server.py`/`models.py`.
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--

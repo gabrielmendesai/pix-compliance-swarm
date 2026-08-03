@@ -8,6 +8,7 @@ efêmera via fixture `mock_bcb_server`) e os serviços reais do SPEC-006
 """
 
 import asyncio
+import hashlib
 import socket
 import threading
 import time
@@ -202,7 +203,7 @@ def test_list_normativos_with_filter_restricts_result(running_server: RunningSer
     }
 
 
-def test_fetch_normativo_known_id_returns_raw_content_and_persists_copy(
+def test_fetch_normativo_known_id_returns_metadata_and_persists_copy(
     running_server: RunningServer, mock_bcb_server
 ) -> None:
     call_result = asyncio.run(
@@ -219,8 +220,20 @@ def test_fetch_normativo_known_id_returns_raw_content_and_persists_copy(
         .read_bytes()
         .decode("utf-8")
     )
-    assert result["conteudo_bruto"] == esperado
+    # Deliberadamente SEM "conteudo_bruto" no resultado: o texto do
+    # documento nunca deve voltar ao contexto do modelo que chamou a
+    # ferramenta MCP sem antes atravessar guard() (Princípio V) — apenas
+    # metadados de confirmação, conferidos aqui contra o ObjectStore real.
+    assert "conteudo_bruto" not in result
+    assert result["hash_sha256"] == hashlib.sha256(esperado.encode("utf-8")).hexdigest()
     assert result["object_store_key"]
+
+    from pix_compliance.config import Settings
+    from pix_compliance.object_store import S3ObjectStore
+
+    settings = Settings(_env_file=None)
+    persistido = S3ObjectStore(settings).download(result["object_store_key"]).decode("utf-8")
+    assert persistido == esperado
 
 
 def test_fetch_normativo_unknown_id_returns_mcp_error(running_server: RunningServer) -> None:

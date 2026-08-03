@@ -27,9 +27,19 @@ retorna todos os normativos listados no site mock, sem filtro aplicado.
 | Campo | Tipo | Descrição |
 |---|---|---|
 | `id` | `str` | Identificador do normativo solicitado |
-| `conteudo_bruto` | `str` | Conteúdo HTML bruto coletado |
 | `hash_sha256` | `str` | Hash do conteúdo coletado nesta chamada |
 | `object_store_key` | `str` | Chave sob a qual o documento bruto foi persistido no `ObjectStore` (SPEC-006) |
+
+**Regra de negócio (adendo pós-implementação, revisão cruzada com SPEC-008)**:
+`FetchNormativoResult` deliberadamente NÃO inclui o conteúdo bruto do
+documento. O resultado de uma tool call MCP retorna ao contexto do modelo
+que a chamou — devolver o texto completo aqui faria PII eventualmente
+plantada no documento (SPEC-003) trafegar a um LLM consumidor (ex. Scraper
+Agent, SPEC-008) sem passar por `guard()` (Princípio V), mesmo sem nenhum
+"processamento" semântico do conteúdo por parte de quem chama. Quem precisa
+do conteúdo integral (Extractor Agent, feature futura) lê diretamente do
+`ObjectStore` pela chave em `object_store_key` — nesse ponto, `guard()` se
+aplica antes de qualquer envio a um LLM.
 
 **Regra de negócio**: se `id` não corresponder a nenhum normativo conhecido
 pelo Adapter, a ferramenta MUST retornar um erro MCP claro (não uma exceção

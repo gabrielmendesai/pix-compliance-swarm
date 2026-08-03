@@ -85,10 +85,16 @@ def build_server(
 
     @app.tool()
     def fetch_normativo(id: str) -> FetchNormativoResult:
-        """Coleta o conteúdo bruto de um normativo específico, persiste uma
-        cópia no ObjectStore, e retorna o conteúdo, o hash e a chave de
-        persistência. Levanta `NormativoNotFoundError` (erro MCP) se `id`
-        não corresponder a nenhum normativo conhecido."""
+        """Coleta o conteúdo bruto de um normativo específico e persiste uma
+        cópia no ObjectStore, retornando apenas metadados de confirmação
+        (hash, chave de persistência) — nunca o conteúdo bruto em si. O
+        resultado desta ferramenta retorna ao contexto do modelo que a
+        chamou (ex. Scraper Agent, SPEC-008); devolver o texto completo aqui
+        faria PII eventualmente plantada no documento (SPEC-003) trafegar a
+        um LLM sem passar por `guard()` (Princípio V). Quem precisa do
+        conteúdo integral lê diretamente do ObjectStore por
+        `object_store_key`. Levanta `NormativoNotFoundError` (erro MCP) se
+        `id` não corresponder a nenhum normativo conhecido."""
         ref = next((r for r in _refs() if r.id == id), None)
         if ref is None:
             raise NormativoNotFoundError(f"normativo não encontrado: {id}")
@@ -99,7 +105,6 @@ def build_server(
 
         return FetchNormativoResult(
             id=id,
-            conteudo_bruto=coletado.content,
             hash_sha256=coletado.hash_sha256,
             object_store_key=object_store_key,
         )

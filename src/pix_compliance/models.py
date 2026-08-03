@@ -322,6 +322,18 @@ class RawDocument(BaseModel):
         return _validar_hash_sha256(valor)
 
 
+class ScrapeResult(BaseModel):
+    """Saída do Scraper Agent (SPEC-008): apenas dados de coleta — nenhum
+    campo de conteúdo estruturado/extraído (artigo, inciso, categoria), que
+    é responsabilidade de uma feature futura (Extractor Agent)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    documentos: list[RawDocument] = Field(default_factory=list)
+    total_coletado: int = Field(ge=0)
+    executado_em: datetime
+
+
 MODELOS_PUBLICOS: tuple[type[BaseModel], ...] = (
     NormativoItem,
     RegraExtraida,
@@ -333,4 +345,5 @@ MODELOS_PUBLICOS: tuple[type[BaseModel], ...] = (
     PipelineRequest,
     PipelineResult,
     RawDocument,
+    ScrapeResult,
 )

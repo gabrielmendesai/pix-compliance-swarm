@@ -23,6 +23,7 @@ dependencies = [
     "pdfplumber>=0.11",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,12 @@ src = ["src", "tests", "fixtures", "mcp_servers"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# F811: fixtures reaproveitadas de outro módulo de teste (import + uso como
+# parâmetro de função) disparam um falso positivo de "redefinição" — padrão
+# comum e intencional de reúso de fixture entre arquivos pytest.
+"tests/test_orchestrator_agent.py" = ["F811"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

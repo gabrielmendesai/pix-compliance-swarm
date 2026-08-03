@@ -21,7 +21,7 @@ silenciosamente) e vocabulários fechados são `StrEnum`, conforme SPEC-002.
 import re
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -297,6 +297,20 @@ class PipelineRequest(BaseModel):
     forcar_reprocessamento: bool = False
 
 
+class EtapaMetric(BaseModel):
+    """Métrica de uma etapa individual do pipeline orquestrado (SPEC-015).
+
+    Sempre registrada mesmo quando a etapa falha — `status` distingue uma
+    falha que abortou o pipeline (`falhou`) de uma que foi tolerada
+    conforme sua política (`degradada`/`ignorada`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nome: str
+    duracao_segundos: float = Field(ge=0)
+    status: Literal["sucesso", "degradada", "ignorada", "falhou"]
+
+
 class PipelineResult(BaseModel):
     """Saída do agente orquestrador."""
 
@@ -308,6 +322,10 @@ class PipelineResult(BaseModel):
     erro: str | None = None
     iniciado_em: datetime
     concluido_em: datetime
+    # SPEC-015: extensão aditiva — duração e status por etapa executada.
+    # Contagem por etapa (SC-004 da SPEC-015) é obtida contando itens por
+    # `status`, sem exigir um segundo campo `dict[str, int]` paralelo.
+    etapas: list[EtapaMetric] = Field(default_factory=list)
 
 
 class RawDocument(BaseModel):
@@ -348,6 +366,7 @@ MODELOS_PUBLICOS: tuple[type[BaseModel], ...] = (
     SearchResult,
     ReportOutput,
     PipelineRequest,
+    EtapaMetric,
     PipelineResult,
     RawDocument,
     ScrapeResult,

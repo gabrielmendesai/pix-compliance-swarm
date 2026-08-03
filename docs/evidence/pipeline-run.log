@@ -1,0 +1,52 @@
+# Log completo de uma execução real de ponta a ponta do Orchestrator (SPEC-015)
+
+# Contexto: capturado rodando o pipeline completo real (scrape -> extract ->
+# {compliance_analyzer, knowledge_builder} em paralelo -> conformance_validator
+# -> report_consolidator) contra infraestrutura real (Postgres/pgvector e
+# MinIO via docker-compose, mesmo servidor MCP do Scraper subido em processo)
+# — LLM_PROVIDER=offline (determinístico, sem custo/rede de LLM real), já que
+# o .env local deste ambiente de captura não tinha as credenciais Bedrock/
+# MinIO completas configuradas para uma execução real com `make run` puro
+# (ver nota abaixo). Todas as linhas de log carregam o mesmo
+# `correlation_id` (7f37d4ef-fb95-4810-993a-9dbae0b84554) do início ao fim,
+# comprovando SC-003. A falha de publicação HTTP na última etapa
+# (`report_consolidator_publicacao_falhou`) é esperada e demonstra a
+# degradação controlada já estabelecida na SPEC-014: o pipeline conclui com
+# sucesso mesmo com a API de destino indisponível no ambiente de captura.
+#
+# NOTA para quem for reproduzir via `make run` puro: o `.env` deste
+# repositório (não versionado) precisa ter OBJECT_STORAGE_ACCESS_KEY/
+# OBJECT_STORAGE_SECRET_KEY/OBJECT_STORAGE_BUCKET (e demais campos
+# obrigatórios de Settings) preenchidos — no ambiente onde este log foi
+# capturado, esses campos estavam incompletos, então a captura foi feita
+# rodando o cenário de teste de ponta a ponta (mesmo código de produção,
+# `run_pipeline`, mesma infraestrutura real) em vez do CLI standalone.
+
+127.0.0.1 - - [03/Aug/2026 19:25:15] "GET / HTTP/1.1" 200 -
+2026-08-03 19:25:17 [info     ] orchestrator_pipeline_iniciado correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 pipeline_id=orch-teste-1
+127.0.0.1 - - [03/Aug/2026 19:25:17] "GET /index.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:18] "GET /normativos/normativo-100-2020-pii.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:18] "GET /normativos/normativo-200-2023-denso.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:18] "GET /normativos/normativo-101-2021-v1.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:18] "GET /normativos/normativo-101-2021-v2.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:18] "GET /index.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:19] "GET /normativos/normativo-100-2020-pii.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:19] "GET /index.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:19] "GET /normativos/normativo-200-2023-denso.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:19] "GET /index.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:19] "GET /normativos/normativo-101-2021-v1.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:20] "GET /index.html HTTP/1.1" 200 -
+127.0.0.1 - - [03/Aug/2026 19:25:20] "GET /normativos/normativo-101-2021-v2.html HTTP/1.1" 200 -
+2026-08-03 19:25:20 [info     ] orchestrator_etapa_concluida   correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 duracao_segundos=2.8910000000032596 etapa=scrape
+2026-08-03 19:25:20 [info     ] guardrail_pii_detectado        correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 ocorrencias=1 tipo=cpf
+2026-08-03 19:25:20 [info     ] guardrail_pii_detectado        correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 ocorrencias=1 tipo=cnpj
+2026-08-03 19:25:20 [info     ] extractor_agent_tentativa_reparo correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 sucesso=True tentativa=1
+2026-08-03 19:25:20 [info     ] extractor_agent_tentativa_reparo correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 sucesso=True tentativa=1
+2026-08-03 19:25:20 [info     ] extractor_agent_tentativa_reparo correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 sucesso=True tentativa=1
+2026-08-03 19:25:20 [info     ] extractor_agent_tentativa_reparo correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 sucesso=True tentativa=1
+2026-08-03 19:25:20 [info     ] orchestrator_etapa_concluida   correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 duracao_segundos=0.031000000002677552 etapa=extract
+2026-08-03 19:25:20 [info     ] orchestrator_etapa_concluida   correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 duracao_segundos=0.09399999999732245 etapa=compliance_analyzer
+2026-08-03 19:25:20 [info     ] orchestrator_etapa_concluida   correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 duracao_segundos=0.10899999999674037 etapa=knowledge_builder
+2026-08-03 19:25:20 [info     ] orchestrator_etapa_concluida   correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 duracao_segundos=0.0 etapa=conformance_validator
+2026-08-03 19:25:26 [error    ] report_consolidator_publicacao_falhou correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 erro='[Errno 11001] getaddrinfo failed' report_id=cf412dbc7b164ac1ba9e449197468f58
+2026-08-03 19:25:26 [info     ] orchestrator_etapa_concluida   correlation_id=7f37d4ef-fb95-4810-993a-9dbae0b84554 duracao_segundos=6.3439999999973224 etapa=report_consolidator

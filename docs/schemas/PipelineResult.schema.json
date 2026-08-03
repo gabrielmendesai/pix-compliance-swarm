@@ -1,5 +1,37 @@
 {
   "$defs": {
+    "EtapaMetric": {
+      "additionalProperties": false,
+      "description": "Métrica de uma etapa individual do pipeline orquestrado (SPEC-015).\n\nSempre registrada mesmo quando a etapa falha — `status` distingue uma\nfalha que abortou o pipeline (`falhou`) de uma que foi tolerada\nconforme sua política (`degradada`/`ignorada`).",
+      "properties": {
+        "duracao_segundos": {
+          "minimum": 0,
+          "title": "Duracao Segundos",
+          "type": "number"
+        },
+        "nome": {
+          "title": "Nome",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "sucesso",
+            "degradada",
+            "ignorada",
+            "falhou"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "nome",
+        "duracao_segundos",
+        "status"
+      ],
+      "title": "EtapaMetric",
+      "type": "object"
+    },
     "ReportOutput": {
       "additionalProperties": false,
       "description": "Metadados de saída de um relatório de conformidade gerado.",
@@ -64,6 +96,13 @@
       ],
       "default": null,
       "title": "Erro"
+    },
+    "etapas": {
+      "items": {
+        "$ref": "#/$defs/EtapaMetric"
+      },
+      "title": "Etapas",
+      "type": "array"
     },
     "iniciado_em": {
       "format": "date-time",

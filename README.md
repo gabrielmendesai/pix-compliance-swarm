@@ -391,3 +391,53 @@ uvicorn pix_compliance.api.app:app --reload
 # Swagger: http://localhost:8000/docs
 pytest tests/test_api.py -q
 ```
+
+## Orchestrator Agent e agendamento (`src/pix_compliance/agents/orchestrator_agent.py`)
+
+Coordena os seis agentes já implementados de ponta a ponta (SPEC-015):
+
+```
+scrape -> extract -> [ compliance_analyzer || knowledge_builder ] -> conformance_validator -> report_consolidator
+```
+
+Três padrões de orquestração, cada um escolhido por uma razão real, não
+"porque sim": `scrape`→`extract` é **sequencial** porque o Extractor
+depende do documento já coletado; `compliance_analyzer`/`knowledge_builder`
+rodam em **paralelo** (`asyncio.gather`) porque partem do mesmo
+`NormativoItem` já extraído sem depender um do resultado do outro; o
+**loop com condição** já existente no Extractor (SPEC-009, reparo de
+validação) é reaproveitado dentro do fluxo maior, não reimplementado. A
+"delegação agente-para-agente via chamada de ferramenta" já existe de
+verdade: o Scraper Agent delega, via uma chamada MCP real, ao servidor MCP
+separado (SPEC-007/008) — este módulo não introduz um segundo mecanismo de
+tool-calling.
+
+Cada etapa tem uma política de falha — **fatal** (aborta o pipeline
+inteiro), **degradável** (loga e segue, ex. falha ao publicar o relatório
+final via HTTP, comportamento já estabelecido na SPEC-014) ou **ignorável**
+— e `PipelineResult` (SPEC-002) ganha uma extensão aditiva,
+`etapas: list[EtapaMetric]`, com status e duração de cada etapa executada.
+Um `correlation_id` único (SPEC-001) amarra todos os logs de uma mesma
+execução, do início ao fim.
+
+`make run` sobe, em processo, uma cópia do mock BCB e o servidor MCP do
+Scraper (mesmo padrão já usado nos testes) antes de coletar — nenhum
+serviço adicional precisa estar rodando manualmente para uma execução
+completa de ponta a ponta. Um lock em processo (`asyncio.Lock`) impede duas
+execuções sobrepostas; o mesmo handler (`run_pipeline`) é chamado tanto
+pelo CLI quanto por um `APScheduler` (`ORCHESTRATOR_SCHEDULE_CRON`), nunca
+dois caminhos de entrada divergentes. O caminho de produção do agendamento
+(EventBridge) fica documentado como IaC em `docs/aws/eventbridge-schedule.tf`,
+sem deploy real (fora de escopo).
+
+**Nota de integração pendente**: `POST /runs` (SPEC-013,
+`src/pix_compliance/api/routes.py`) ainda mantém sua própria orquestração
+inline, criada antes deste módulo existir — delegar a `run_pipeline` em vez
+de manter uma segunda implementação do mesmo fluxo é uma ação de
+acompanhamento registrada, não resolvida nesta spec.
+
+```bash
+make run
+pytest tests/test_orchestrator_agent.py -q
+cat docs/evidence/pipeline-run.log
+```

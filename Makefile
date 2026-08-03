@@ -5,7 +5,7 @@ install:
 	.venv/bin/pip install -e ".[dev]" || .venv/Scripts/pip install -e ".[dev]"
 
 run:
-	python -m pix_compliance.logging
+	python -m pix_compliance.agents.orchestrator_agent
 
 test:
 	pytest

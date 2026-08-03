@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     compliance_analyzer_max_concurrency: int
     compliance_analyzer_confidence_threshold: float
 
+    # SPEC-015: cron (5 campos, formato padrão) do disparo periódico do
+    # pipeline completo via APScheduler — mesmo handler usado pelo CLI
+    # (FR-008), nunca um segundo caminho de entrada.
+    orchestrator_schedule_cron: str = "0 3 * * *"
+
     @property
     def embedding_dimension(self) -> int:
         """Dimensão do vetor de embedding, travada em `EMBEDDING_DIMENSION`

@@ -34,7 +34,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ConfigDict, Field
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from pix_compliance.config import settings
+from pix_compliance.config import EMBEDDING_DIMENSION, settings
 
 logger = structlog.get_logger()
 
@@ -287,8 +287,15 @@ class BedrockEmbeddingsProvider:
             try:
                 for attempt in _retrying(self._fallback_config, ClientError):
                     with attempt:
+                        # Titan Text Embeddings V2 usa 1024 dimensões por
+                        # padrão quando `dimensions` não é especificado —
+                        # tem que ser pedido explicitamente para bater com
+                        # o schema do pgvector (EMBEDDING_DIMENSION, SPEC-005/006).
                         response = self._client.invoke_model(
-                            modelId=model_id, body=json.dumps({"inputText": text})
+                            modelId=model_id,
+                            body=json.dumps(
+                                {"inputText": text, "dimensions": EMBEDDING_DIMENSION}
+                            ),
                         )
                         body = json.loads(response["body"].read())
                         logger.info(

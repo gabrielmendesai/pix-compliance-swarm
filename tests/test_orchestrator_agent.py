@@ -282,17 +282,17 @@ class TestObservabilidade:
     mesmo caminho de `make run` (quickstart.md, Cenário 5)."""
 
     def test_pipeline_etapa_concluida_carrega_mesmo_correlation_id_e_contadores(
-        self, mock_bcb_server, monkeypatch, capsys
+        self, monkeypatch, capsys
     ) -> None:
         import json
 
         import structlog
 
-        from tests.conftest import free_port
-
-        monkeypatch.setenv("BCB_BASE_URL", mock_bcb_server.base_url)
-        monkeypatch.setenv("MCP_SCRAPER_HOST", "127.0.0.1")
-        monkeypatch.setenv("MCP_SCRAPER_PORT", str(free_port()))
+        # Sem `mock_bcb_server`/porta manual: `run_pipeline` com
+        # `bootstrap_local_servers=True` já sobe seu próprio mock BCB e
+        # servidor MCP em portas efêmeras escolhidas pelo SO (SPEC-017,
+        # correção do achado de CI real — porta fixa causava
+        # `Address already in use` de forma determinística em Linux).
         _reload_settings(monkeypatch)
 
         from pix_compliance.agents.orchestrator_agent import run_pipeline
@@ -339,14 +339,23 @@ class TestObservabilidade:
 
         eventos_etapa = [log for log in logs if log["event"] == "pipeline_etapa_concluida"]
         nomes = [log["nome"] for log in eventos_etapa]
-        assert nomes == [
+        # compliance_analyzer/knowledge_builder rodam em paralelo
+        # (asyncio.gather) — a ordem de CONCLUSÃO (logo, de log) entre os
+        # dois não é determinística por design (nenhum consome o resultado
+        # do outro), só a posição relativa às etapas sequenciais importa.
+        assert set(nomes) == {
             "scrape",
             "extract",
             "compliance_analyzer",
             "knowledge_builder",
             "conformance_validator",
             "report_consolidator",
-        ]
+        }
+        assert nomes.index("scrape") < nomes.index("extract")
+        assert nomes.index("extract") < nomes.index("compliance_analyzer")
+        assert nomes.index("extract") < nomes.index("knowledge_builder")
+        assert nomes.index("compliance_analyzer") < nomes.index("conformance_validator")
+        assert nomes.index("knowledge_builder") < nomes.index("report_consolidator")
 
         correlation_ids = {log["correlation_id"] for log in eventos_etapa}
         assert len(correlation_ids) == 1

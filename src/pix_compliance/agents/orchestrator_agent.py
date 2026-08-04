@@ -41,7 +41,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -185,29 +184,50 @@ def _start_daemon_thread_com_contexto(target: Callable[[], object]) -> threading
     return thread
 
 
-def _start_mock_bcb_server(settings: Settings) -> tuple[http.server.HTTPServer, threading.Thread]:
+def _start_mock_bcb_server(
+    settings: Settings,
+) -> tuple[http.server.HTTPServer, threading.Thread, int]:
     """Sobe uma cópia efêmera do site mock do BCB (`mock_bcb/`, SPEC-003)
-    em processo, no host/porta já configurados em `settings.bcb_base_url`
-    — mesmo padrão de `tests/conftest.py::mock_bcb_server`, sem porta
-    dinâmica: `make run` depende de `BCB_BASE_URL` já apontar para onde
-    este servidor vai escutar (research.md, Decisão 2)."""
-    parsed = urlparse(str(settings.bcb_base_url))
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 80
+    em processo, sempre em porta livre escolhida pelo SO (`port=0`) — nunca
+    na porta fixa de `settings.bcb_base_url`. Duas ou mais execuções de
+    `run_pipeline(bootstrap_local_servers=True)` na mesma sessão de
+    processo (ex. testes sequenciais) já causaram `Address already in use`
+    de forma determinística em Linux (SO_REUSEADDR não permite dois
+    listeners ativos na mesma porta lá, diferente do comportamento mais
+    permissivo do Windows) — porta efêmera elimina essa classe de conflito
+    inteira, em vez de só mitigá-la (SPEC-017, achado de CI real). O
+    chamador (`run_pipeline`) usa a porta real devolvida aqui para corrigir
+    a URL que o servidor MCP (que busca páginas deste mock) de fato usa.
+
+    Bind sempre em `127.0.0.1` numérico, nunca no hostname configurado em
+    `settings.bcb_base_url` (ex. `localhost`): resolução dual-stack
+    IPv4/IPv6 de `localhost` mediu ~2.2s de latência adicional por
+    requisição neste ambiente (contra ~0.2s com o IP numérico) —
+    o suficiente para estourar o `read_timeout=5.0` do toolset MCP do
+    Scraper Agent em `list_normativos` (que faz várias requisições
+    sequenciais), mesmo com o mock respondendo rápido de verdade. Este
+    servidor é sempre local/efêmero (mesmo processo), então não há
+    motivo para respeitar um hostname configurado para outros contextos
+    de deploy aqui — diferente de `mcp_scraper_host` (`_start_mcp_server`
+    abaixo), que continua vindo de `settings` porque pode legitimamente
+    ser `0.0.0.0` num deploy em container (SPEC-016)."""
 
     def _handler(*args, **kwargs):
         return http.server.SimpleHTTPRequestHandler(*args, directory=str(MOCK_BCB_DIR), **kwargs)
 
-    server = http.server.HTTPServer((host, port), _handler)
+    server = http.server.HTTPServer(("127.0.0.1", 0), _handler)
+    porta_real = server.server_address[1]
     thread = _start_daemon_thread_com_contexto(server.serve_forever)
-    return server, thread
+    return server, thread, porta_real
 
 
-def _start_mcp_server(settings: Settings) -> tuple[uvicorn.Server, threading.Thread]:
-    """Sobe o servidor MCP SSE do Scraper (SPEC-007) em processo, no host/
-    porta já configurados em `settings.mcp_scraper_host`/`mcp_scraper_port`
-    — mesmo padrão de `tests/test_scraper_agent.py::running_mcp_server`
-    (research.md, Decisão 2)."""
+def _start_mcp_server(settings: Settings) -> tuple[uvicorn.Server, threading.Thread, int]:
+    """Sobe o servidor MCP SSE do Scraper (SPEC-007) em processo, sempre em
+    porta livre escolhida pelo SO — mesmo raciocínio de porta efêmera de
+    `_start_mock_bcb_server` acima (SPEC-017). `settings` já deve refletir
+    a URL real do mock BCB (corrigida pelo chamador após
+    `_start_mock_bcb_server`), já que `build_server` lê
+    `settings.bcb_base_url` para saber de onde buscar as páginas."""
     from mcp_servers.scraper_sse.server import build_server
 
     mcp_app = build_server(settings)
@@ -215,7 +235,7 @@ def _start_mcp_server(settings: Settings) -> tuple[uvicorn.Server, threading.Thr
     config = uvicorn.Config(
         starlette_app,
         host=settings.mcp_scraper_host,
-        port=settings.mcp_scraper_port,
+        port=0,
         log_level="warning",
     )
     server = uvicorn.Server(config)
@@ -224,7 +244,8 @@ def _start_mcp_server(settings: Settings) -> tuple[uvicorn.Server, threading.Thr
     deadline = time.monotonic() + 5
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.02)
-    return server, thread
+    porta_real = server.servers[0].sockets[0].getsockname()[1]
+    return server, thread, porta_real
 
 
 def _resultado_travado(request: PipelineRequest, iniciado_em: datetime) -> PipelineResult:
@@ -286,19 +307,36 @@ async def run_pipeline(
         object_store = S3ObjectStore(settings)
         vector_store = PgVectorStore(settings)
         client = http_client or httpx.Client(base_url=settings.api_url)
+
+        bcb_server = mcp_server = None
+        bcb_thread = mcp_thread = None
+        # `settings_efetivo` reflete as portas efêmeras reais escolhidas
+        # pelos servidores de bootstrap (SPEC-017) — `context`/`_executar_etapas`
+        # usam este objeto (nunca o `settings` original) para saber onde o
+        # servidor MCP de fato está escutando; quando não há bootstrap,
+        # `settings_efetivo` é o próprio `settings` (portas já configuradas
+        # externamente, ex. `mcp-scraper` como container do compose).
+        settings_efetivo = settings
+        if resolved_bootstrap_local_servers:
+            bcb_server, bcb_thread, bcb_porta = _start_mock_bcb_server(settings)
+            # 127.0.0.1 numérico, não o hostname configurado — casa com o
+            # bind de `_start_mock_bcb_server` (ver docstring lá: evita a
+            # latência de resolução dual-stack de "localhost").
+            settings_efetivo = settings.model_copy(
+                update={"bcb_base_url": f"http://127.0.0.1:{bcb_porta}"}
+            )
+            mcp_server, mcp_thread, mcp_porta = _start_mcp_server(settings_efetivo)
+            settings_efetivo = settings_efetivo.model_copy(
+                update={"mcp_scraper_port": mcp_porta}
+            )
+
         context = PipelineContext(
-            settings=settings,
+            settings=settings_efetivo,
             object_store=object_store,
             vector_store=vector_store,
             http_client=client,
             correlation_id=correlation_id,
         )
-
-        bcb_server = mcp_server = None
-        bcb_thread = mcp_thread = None
-        if resolved_bootstrap_local_servers:
-            bcb_server, bcb_thread = _start_mock_bcb_server(settings)
-            mcp_server, mcp_thread = _start_mcp_server(settings)
 
         etapas: list[EtapaMetric] = []
         try:

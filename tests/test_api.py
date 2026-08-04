@@ -232,24 +232,22 @@ def test_get_health_reporta_degradado_sem_lancar_erro(monkeypatch) -> None:
 # restante do pipeline (MCP real, agentes reais, rota HTTP real) intacto.
 
 
-def test_post_runs_dispara_pipeline_completo_com_as_seis_etapas(
-    client, monkeypatch, mock_bcb_server
-) -> None:
+def test_post_runs_dispara_pipeline_completo_com_as_seis_etapas(client, monkeypatch) -> None:
     import importlib
 
     from pydantic_ai.models.function import FunctionModel
 
-    from tests.conftest import free_port
     from tests.test_orchestrator_agent import (
         _echo_normativo_id_analyzer_decision,
         _generic_valid_extractor_decision,
     )
     from tests.test_scraper_agent import _make_collect_all_decision
 
-    monkeypatch.setenv("BCB_BASE_URL", mock_bcb_server.base_url)
-    monkeypatch.setenv("MCP_SCRAPER_HOST", "127.0.0.1")
-    monkeypatch.setenv("MCP_SCRAPER_PORT", str(free_port()))
-
+    # Sem `mock_bcb_server`/porta manual: `run_pipeline` (chamado com
+    # `bootstrap_local_servers=True` por padrão) já sobe seu próprio mock
+    # BCB e servidor MCP em portas efêmeras escolhidas pelo SO (SPEC-017,
+    # correção do achado de CI real — porta fixa causava
+    # `Address already in use` de forma determinística em Linux).
     import pix_compliance.config as config_module
 
     importlib.reload(config_module)
@@ -274,7 +272,7 @@ def test_post_runs_dispara_pipeline_completo_com_as_seis_etapas(
         "/runs",
         json={
             "pipeline_id": "run-teste",
-            "fontes": [mock_bcb_server.base_url],
+            "fontes": ["https://mock-bcb.local/"],
             "forcar_reprocessamento": False,
         },
     )

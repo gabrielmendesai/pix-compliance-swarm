@@ -7,6 +7,74 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+
+    # Postgres/pgvector e MinIO reais — mesmas imagens e credenciais do
+    # `docker-compose.yml` (serviços `postgres`/`minio`), portas mapeadas
+    # para `localhost` (o job roda direto no runner, não dentro de outro
+    # container, então os serviços ficam acessíveis em `localhost`, igual
+    # ao `POSTGRES_DSN`/`OBJECT_STORAGE_ENDPOINT` já assumidos por
+    # `.env.example`/`config.py`). `minio/minio` não tem healthcheck nem
+    # comando padrão utilizável sem `command:` (que `services:` do GitHub
+    # Actions não suporta, diferente do compose) — `bitnami/minio` roda o
+    # servidor por padrão só com as env vars, sem precisar de override de
+    # comando.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: pix
+          POSTGRES_PASSWORD: pix
+          POSTGRES_DB: pix_compliance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U pix -d pix_compliance"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+          - 9001:9001
+        options: >-
+          --health-cmd="curl -f http://localhost:9000/minio/health/live"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    # Valores fixos e falsos (nunca credenciais reais) — os mesmos já
+    # usados em `tests/conftest.py::REQUIRED_ENV`, necessários porque
+    # `pix_compliance.config.settings` é construído no import do módulo
+    # (`Settings()` no escopo do módulo): sem eles, a suíte inteira falha
+    # na coleta com `ConfigurationError`, antes mesmo de qualquer teste
+    # rodar — não é específico dos testes de Postgres/MinIO.
+    env:
+      AWS_ACCESS_KEY_ID: AKIAFAKEEXAMPLE
+      AWS_SECRET_ACCESS_KEY: fake-secret
+      AWS_REGION: us-east-1
+      BEDROCK_MODEL_ID: anthropic.claude-3-fake
+      BEDROCK_EMBEDDINGS_MODEL_ID: amazon.titan-embed-fake
+      API_URL: http://localhost:8000
+      POSTGRES_DSN: postgresql://pix:pix@localhost:5432/pix_compliance
+      OBJECT_STORAGE_ENDPOINT: http://localhost:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
+      OBJECT_STORAGE_BUCKET: pix-compliance-test
+      BCB_BASE_URL: http://localhost:8080
+      MCP_SCRAPER_HOST: 127.0.0.1
+      MCP_SCRAPER_PORT: 8100
+      COMPLIANCE_ANALYZER_MAX_CONCURRENCY: 3
+      COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD: 0.7
+      # LLM_PROVIDER=offline (SPEC-005) já isola a suíte inteira de rede e
+      # credenciais AWS reais (SPEC-017, research.md Decisão 0/5) — nenhum
+      # secret precisa ser configurado neste workflow.
+      LLM_PROVIDER: offline
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,8 +88,16 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
-      # LLM_PROVIDER=offline (SPEC-005) já isola a suíte inteira de rede e
-      # credenciais AWS reais (SPEC-017, research.md Decisão 0/5) — nenhum
-      # secret precisa ser configurado neste workflow.
+      # scripts/bootstrap.py (SPEC-016) aplica a migration do pgvector
+      # (migrations/0001_create_vector_store_schema.sql) — sem isso, os
+      # testes de storage/RAG falham por tabela inexistente mesmo com o
+      # Postgres já saudável. A criação do bucket do MinIO que o mesmo
+      # script faz é redundante aqui (S3ObjectStore já cria o bucket
+      # sozinho quando instanciado, SPEC-006) mas inofensiva e idempotente
+      # — reaproveitar o script inteiro evita duplicar a lógica de
+      # migration num segundo lugar (Princípio II/III).
+      - name: Aplicar migration do pgvector
+        run: python scripts/bootstrap.py
+
       - name: Testes (pytest)
         run: pytest -q

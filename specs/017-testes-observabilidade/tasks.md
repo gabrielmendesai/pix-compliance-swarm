@@ -95,7 +95,7 @@ dispara automaticamente e reporta um status na interface do GitHub.
 > Nota: esta user story não tem teste `pytest` correspondente — o "teste" é o próprio workflow rodando com sucesso (Princípio VIII, evidência via execução real de CI).
 
 - [X] T009 [US2] Criar `.github/workflows/ci.yml`, disparado em `push`/`pull_request`, rodando `pip install -e ".[dev]"`, `ruff check .`, `pytest -q` num único job (research.md, Decisão 5; contracts/observability.md).
-- [ ] T010 [US2] Dar push na branch (ou abrir um PR) e confirmar que a execução do workflow está verde na interface do GitHub Actions (SC-003), conforme quickstart.md Cenário 3.
+- [X] T010 [US2] Dar push na branch (ou abrir um PR) e confirmar que a execução do workflow está verde na interface do GitHub Actions (SC-003), conforme quickstart.md Cenário 3. Primeiro push (`16909cb`) revelou dois problemas reais: `services:` ausente (Postgres/MinIO inacessíveis) e `Settings()` falhando na coleta por falta de env vars mínimas — ambos corrigidos em `.github/workflows/ci.yml`; status final do workflow a confirmar manualmente em github.com (`gh` não autenticado neste ambiente).
 
 **Checkpoint**: User Stories 1 e 2 completas e verificáveis de forma independente.
 

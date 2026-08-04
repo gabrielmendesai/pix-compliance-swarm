@@ -38,7 +38,7 @@ integração real com o Banco Central ou com o arranjo PIX de produção.
 ## Instalação e variáveis de ambiente
 
 ```bash
-git clone <url-do-repositório>
+git clone https://github.com/gabrielmendesai/pix-compliance-swarm
 cd pix-compliance-swarm
 cp .env.example .env
 # preencher .env: no mínimo AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_REGION

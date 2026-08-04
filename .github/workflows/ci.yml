@@ -34,7 +34,13 @@ jobs:
           --health-retries=10
 
       minio:
-        image: bitnami/minio:latest
+        # bitnami/minio:latest parou de existir no Docker Hub (a Bitnami
+        # moveu a maioria das tags para o catálogo pago "Bitnami Secure
+        # Images" a partir de ago/2025, e o MinIO descontinuou suas
+        # próprias imagens gratuitas em out/2025) — usamos o repositório
+        # legado, com o último build publicado antes da mudança, ainda
+        # gratuito e com a mesma interface (env vars, portas).
+        image: bitnamilegacy/minio:2025.7.23-debian-12-r5
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin

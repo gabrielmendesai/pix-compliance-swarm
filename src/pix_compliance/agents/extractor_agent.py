@@ -23,10 +23,12 @@ versões — isso pertence a agentes futuros (Compliance Analyzer e além).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 import structlog
 from anthropic import AsyncAnthropicBedrock
 from bs4 import BeautifulSoup
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
@@ -36,10 +38,47 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from pix_compliance.config import Settings
 from pix_compliance.guardrails import guard
-from pix_compliance.models import NormativoItem
+from pix_compliance.models import CategoriaCompliance, NormativoItem, RawDocument, TipoNormativo
 from pix_compliance.object_store import ObjectStore
 
 logger = structlog.get_logger()
+
+
+class _NormativoItemEstrutura(BaseModel):
+    """Schema de saída pedido ao LLM: os mesmos campos de `NormativoItem`
+    (SPEC-002), exceto `url_origem`/`hash_conteudo`. Esses dois já chegam
+    prontos e corretos no `RawDocument` de entrada, calculados de verdade
+    pelo Scraper Agent (SPEC-007/008) — pedir ao LLM para "gerar" um
+    SHA-256 ou uma URL não é estruturar um campo ambíguo (a única
+    responsabilidade do LLM, ver docstring do módulo); é pedir para ele
+    inventar um valor que não tem como computar de verdade, o que produzia
+    falhas de validação recorrentes em documentos reais.
+    `_completar_com_proveniencia` (abaixo) preenche os dois campos restantes
+    em código, copiados diretamente do `RawDocument`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    titulo: str
+    tipo: TipoNormativo
+    numero: str
+    artigo: str | None = None
+    inciso: str | None = None
+    texto: str
+    data_publicacao: date
+    data_vigencia: date
+    categoria: CategoriaCompliance
+    versao: int = Field(ge=1)
+
+
+def _completar_com_proveniencia(
+    estrutura: _NormativoItemEstrutura, raw_document: RawDocument
+) -> NormativoItem:
+    return NormativoItem(
+        **estrutura.model_dump(),
+        url_origem=raw_document.source_uri,
+        hash_conteudo=raw_document.hash_conteudo,
+    )
 
 
 @dataclass
@@ -118,16 +157,16 @@ def extract_html_text(data: bytes) -> str:
 
 def build_extractor_agent(
     settings: Settings, model: Model | None = None
-) -> Agent[ExtractorAgentDeps, NormativoItem]:
+) -> Agent[ExtractorAgentDeps, _NormativoItemEstrutura]:
     """Monta o Agent com `deps_type=ExtractorAgentDeps`,
-    `output_type=NormativoItem`, `retries={"output": 0}` — o loop de reparo
-    de validação é escrito à mão em `run_extractor_agent` (ver research.md),
-    não delegado ao retry automático da biblioteca, para permitir log
-    estruturado explícito por tentativa (FR-007)."""
+    `output_type=_NormativoItemEstrutura`, `retries={"output": 0}` — o loop
+    de reparo de validação é escrito à mão em `run_extractor_agent` (ver
+    research.md), não delegado ao retry automático da biblioteca, para
+    permitir log estruturado explícito por tentativa (FR-007)."""
     return Agent(
         model=model or _build_model(settings),
         deps_type=ExtractorAgentDeps,
-        output_type=NormativoItem,
+        output_type=_NormativoItemEstrutura,
         retries={"output": 0},
         instructions=(
             "Você estrutura o texto de um normativo do BCB/PIX em um "
@@ -143,15 +182,16 @@ def build_extractor_agent(
 def run_extractor_agent(
     settings: Settings,
     object_store: ObjectStore,
-    object_store_key: str,
-    content_type: str,
+    raw_document: RawDocument,
     model: Model | None = None,
 ) -> NormativoItem:
     """Lê o documento bruto do ObjectStore, extrai o texto
-    deterministicamente (PDF ou HTML, conforme `content_type`), e estrutura
-    o resultado em `NormativoItem` via LLM."""
-    raw_bytes = object_store.download(object_store_key)
-    if content_type == "application/pdf":
+    deterministicamente (PDF ou HTML, conforme `raw_document.content_type`),
+    estrutura o resultado via LLM e completa `url_origem`/`hash_conteudo`
+    a partir do próprio `raw_document` (nunca pedidos ao LLM, ver
+    `_NormativoItemEstrutura`)."""
+    raw_bytes = object_store.download(raw_document.bytes_ref)
+    if raw_document.content_type == "application/pdf":
         texto_extraido = extract_pdf_text(raw_bytes)
     else:
         texto_extraido = extract_html_text(raw_bytes)
@@ -166,7 +206,7 @@ def run_extractor_agent(
     deps = ExtractorAgentDeps(object_store=object_store)
 
     prompt_inicial = (
-        f"Texto extraído do documento (chave {object_store_key!r}):\n\n"
+        f"Texto extraído do documento (chave {raw_document.bytes_ref!r}):\n\n"
         f"{texto_protegido}"
     )
 
@@ -205,20 +245,28 @@ def run_extractor_agent(
                 f"Reparo de validação esgotado após 2 tentativas: {exc2.__cause__}"
             ) from exc2
         logger.info("extractor_agent_tentativa_reparo", tentativa=2, sucesso=True)
-        return result.output
+        return _completar_com_proveniencia(result.output, raw_document)
 
     logger.info("extractor_agent_tentativa_reparo", tentativa=1, sucesso=True)
-    return result.output
+    return _completar_com_proveniencia(result.output, raw_document)
 
 
 if __name__ == "__main__":
+    import hashlib
     import sys
+    from datetime import datetime
 
     from pix_compliance.config import settings as default_settings
     from pix_compliance.object_store import S3ObjectStore
 
-    _key, _content_type = sys.argv[1], sys.argv[2]
-    _resultado = run_extractor_agent(
-        default_settings, S3ObjectStore(default_settings), _key, _content_type
+    _key, _content_type, _source_uri = sys.argv[1], sys.argv[2], sys.argv[3]
+    _store = S3ObjectStore(default_settings)
+    _raw_document = RawDocument(
+        source_uri=_source_uri,
+        content_type=_content_type,
+        bytes_ref=_key,
+        hash_conteudo=hashlib.sha256(_store.download(_key)).hexdigest(),
+        coletado_em=datetime.now(),
     )
+    _resultado = run_extractor_agent(default_settings, _store, _raw_document)
     print(_resultado.model_dump_json(indent=2))

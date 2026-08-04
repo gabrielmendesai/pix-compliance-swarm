@@ -9,6 +9,7 @@ existirem (Princípio IX da constituição). Usam `FunctionModel` determinístic
 
 import hashlib
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from structlog.testing import capture_logs
 
+from pix_compliance.models import RawDocument
 from tests.conftest import REQUIRED_ENV, settings_from_env
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "documents"
@@ -26,8 +28,6 @@ DOC_STEMS = [
     "normativo-101-2021-v2",
     "normativo-200-2023-denso",
 ]
-
-_FAKE_HASH = hashlib.sha256(b"conteudo-de-teste").hexdigest()
 
 
 @pytest.fixture(autouse=True)
@@ -49,13 +49,24 @@ def object_store(_required_env):
     return S3ObjectStore(_settings())
 
 
-def _upload_fixture(store, stem: str, ext: str) -> tuple[str, str]:
+def _upload_fixture(store, stem: str, ext: str) -> RawDocument:
+    """Sobe a fixture no `ObjectStore` real e devolve o `RawDocument`
+    correspondente, com `hash_conteudo` calculado de verdade (sha256 dos
+    bytes reais) — mesma responsabilidade que o Scraper Agent (SPEC-007/008)
+    já tem em produção, reaproveitada aqui para que os testes exerçam
+    `run_extractor_agent` com a mesma forma de entrada do pipeline real."""
     path = FIXTURES_DIR / f"{stem}.{ext}"
     data = path.read_bytes()
     key = f"test-extractor/{stem}.{ext}"
     store.upload(key, data)
     content_type = "application/pdf" if ext == "pdf" else "text/html"
-    return key, content_type
+    return RawDocument(
+        source_uri=f"https://mock-bcb.local/normativos/{stem}.{ext}",
+        content_type=content_type,
+        bytes_ref=key,
+        hash_conteudo=hashlib.sha256(data).hexdigest(),
+        coletado_em=datetime.now(UTC),
+    )
 
 
 def _valid_output_decision(doc_id: str):
@@ -75,8 +86,6 @@ def _valid_output_decision(doc_id: str):
             "data_publicacao": "2020-01-01",
             "data_vigencia": "2020-01-31",
             "categoria": "liquidação",
-            "url_origem": "https://mock-bcb.local/normativo",
-            "hash_conteudo": _FAKE_HASH,
             "versao": 1,
         }
         return ModelResponse(parts=[ToolCallPart(tool_name=output_tool_name, args=args)])
@@ -118,14 +127,14 @@ def test_run_extractor_agent_produces_valid_normativo_item_for_mock_documents(
 ) -> None:
     from pix_compliance.agents.extractor_agent import run_extractor_agent
 
-    key, content_type = _upload_fixture(object_store, stem, ext)
+    raw_document = _upload_fixture(object_store, stem, ext)
     model = FunctionModel(_valid_output_decision(stem))
 
-    resultado = run_extractor_agent(
-        _settings(), object_store, key, content_type, model=model
-    )
+    resultado = run_extractor_agent(_settings(), object_store, raw_document, model=model)
 
     assert resultado.id == stem
+    assert str(resultado.url_origem) == str(raw_document.source_uri)
+    assert resultado.hash_conteudo == raw_document.hash_conteudo
 
 
 # --- User Story 2: todo texto extraído passa por guard() antes do LLM -------
@@ -154,8 +163,6 @@ def _echo_prompt_into_texto_decision(doc_id: str):
             "data_publicacao": "2020-01-01",
             "data_vigencia": "2020-01-31",
             "categoria": "liquidação",
-            "url_origem": "https://mock-bcb.local/normativo",
-            "hash_conteudo": _FAKE_HASH,
             "versao": 1,
         }
         return ModelResponse(parts=[ToolCallPart(tool_name=output_tool_name, args=args)])
@@ -168,7 +175,7 @@ def test_guard_is_called_before_llm_for_pii_document(object_store, monkeypatch) 
     from pix_compliance.guardrails import guard as real_guard
 
     stem = "normativo-100-2020-pii"
-    key, content_type = _upload_fixture(object_store, stem, "html")
+    raw_document = _upload_fixture(object_store, stem, "html")
     texto_bruto = ea_module.extract_html_text((FIXTURES_DIR / f"{stem}.html").read_bytes())
     esperado = real_guard(texto_bruto)
 
@@ -182,7 +189,7 @@ def test_guard_is_called_before_llm_for_pii_document(object_store, monkeypatch) 
     model = FunctionModel(_echo_prompt_into_texto_decision(stem))
 
     resultado = ea_module.run_extractor_agent(
-        _settings(), object_store, key, content_type, model=model
+        _settings(), object_store, raw_document, model=model
     )
 
     assert chamadas == [texto_bruto]
@@ -219,8 +226,6 @@ def _invalid_then_valid_decision(doc_id: str, state: dict):
                 "data_publicacao": "2020-01-01",
                 "data_vigencia": "2020-01-31",
                 "categoria": "liquidação",
-                "url_origem": "https://mock-bcb.local/normativo",
-                "hash_conteudo": _FAKE_HASH,
                 "versao": 1,
             }
         return ModelResponse(parts=[ToolCallPart(tool_name=output_tool_name, args=args)])
@@ -252,13 +257,13 @@ def test_validation_repair_loop_triggers_and_succeeds_on_second_attempt(
     from pix_compliance.agents.extractor_agent import run_extractor_agent
 
     stem = "normativo-101-2021-v1"
-    key, content_type = _upload_fixture(object_store, stem, "html")
+    raw_document = _upload_fixture(object_store, stem, "html")
     state = {"calls": 0}
     model = FunctionModel(_invalid_then_valid_decision(stem, state))
 
     with capture_logs() as logs:
         resultado = run_extractor_agent(
-            _settings(), object_store, key, content_type, model=model
+            _settings(), object_store, raw_document, model=model
         )
 
     assert state["calls"] == 2
@@ -282,12 +287,12 @@ def test_validation_repair_loop_stops_at_second_attempt_never_a_third(
     )
 
     stem = "normativo-101-2021-v1"
-    key, content_type = _upload_fixture(object_store, stem, "html")
+    raw_document = _upload_fixture(object_store, stem, "html")
     state = {"calls": 0}
     model = FunctionModel(_always_invalid_decision(state))
 
     with pytest.raises(ValidationRepairExhaustedError):
-        run_extractor_agent(_settings(), object_store, key, content_type, model=model)
+        run_extractor_agent(_settings(), object_store, raw_document, model=model)
 
     assert state["calls"] == 2
 

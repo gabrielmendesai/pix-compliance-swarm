@@ -115,12 +115,24 @@ services:
     environment:
       POSTGRES_DSN: postgresql://pix:pix@postgres:5432/pix_compliance
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      BCB_BASE_URL: http://mock-bcb:8080
+      MCP_SCRAPER_HOST: mcp-scraper
+      API_URL: http://api:8000
+      # POST /runs delega a run_pipeline (SPEC-015) — mock-bcb/mcp-scraper
+      # já são containers próprios aqui, mesmo raciocínio do `scheduler`
+      # abaixo: desabilita o bootstrap efêmero em processo (evita colisão
+      # de porta, research.md, Decisão 5).
+      ORCHESTRATOR_BOOTSTRAP_LOCAL_SERVERS: "false"
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      mock-bcb:
+        condition: service_healthy
+      mcp-scraper:
         condition: service_healthy
       bootstrap:
         condition: service_completed_successfully

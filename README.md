@@ -524,7 +524,11 @@ referenciado por chave no `ObjectStore`) em `NormativoItem` validado, em
 dois passos: extração de texto **determinística** (`pdfplumber` para PDF,
 `BeautifulSoup` para HTML — nunca delegada ao LLM), seguida de `guard()`
 (SPEC-004) sobre o texto extraído e só então estruturação via LLM apenas dos
-campos ambíguos que a extração não resolveu sozinha.
+campos ambíguos que a extração não resolveu sozinha. `url_origem`/
+`hash_conteudo` nunca são pedidos ao LLM — um SHA-256 real não é algo que um
+modelo de linguagem consiga computar, só alucinar em formato válido; ambos
+são copiados diretamente do `RawDocument` de entrada, já calculados de
+verdade pelo Scraper Agent (SPEC-007/008).
 
 Um loop de reparo de validação, escrito explicitamente (não o retry
 automático do Pydantic AI) e instrumentado com log estruturado por
@@ -535,7 +539,7 @@ do Pydantic — nunca uma terceira tentativa. PDF corrompido/malformado gera
 `skills/extractor-skill/SKILL.md`.
 
 ```bash
-python -m pix_compliance.agents.extractor_agent <object_store_key> <content_type>
+python -m pix_compliance.agents.extractor_agent <object_store_key> <content_type> <source_uri>
 pytest tests/test_extractor_agent.py -q
 ```
 
@@ -660,14 +664,11 @@ decisão de LLM aqui, apenas consolidação determinística de dados e I/O.
 Este agente foi implementado (SPEC-014) antes de SPEC-011 (Conformance
 Validator) e SPEC-013 (API FastAPI) existirem como código, testado contra
 os contratos já congelados (`ConformanceReport`/`ReportOutput`, SPEC-002) e
-um cliente HTTP mock (`httpx.MockTransport`) — hoje ambas já existem, mas
-**este agente ainda não foi revisado** para receber o `ConformanceReport`
-real produzido pelo Conformance Validator em vez de um construído
-manualmente pelo chamador; essa revisão continua registrada como pendência
-para uma spec/tarefa futura própria (a API FastAPI, SPEC-013, resolve essa
-lacuna por outro caminho: `POST /runs` monta o `ConformanceReport` real e
-persiste em `reports/<id>.conformance.json` para `GET /compliance`, sem
-depender dessa revisão). Ver `skills/report-consolidator-skill/SKILL.md`.
+um cliente HTTP mock (`httpx.MockTransport`) — hoje, com `POST /runs`
+delegando inteiramente a `run_pipeline` (SPEC-015), este agente recebe o
+`ConformanceReport` real produzido pelo Conformance Validator dentro dessa
+mesma execução, não mais um objeto construído manualmente pelo chamador.
+Ver `skills/report-consolidator-skill/SKILL.md`.
 
 ```bash
 python -m pix_compliance.agents.report_consolidator_agent
@@ -688,7 +689,7 @@ agentes já existentes.
 | `GET /compliance` | Gap analysis já produzido, com filtro por `severidade_min` |
 | `GET /search?query=...&top_k=...` | Busca semântica via Knowledge Builder Agent (SPEC-012) |
 | `GET /health` | Conectividade com `ObjectStore`/`PgVectorStore` — nunca retorna 500 por dependência indisponível, reporta `"degraded"` |
-| `POST /runs` | Dispara, sincronamente, Compliance Analyzer → Conformance Validator → Knowledge Builder → Report Consolidator sobre o corpus mock, retornando `PipelineResult` já completo |
+| `POST /runs` | Delega inteiramente a `run_pipeline` (SPEC-015), o mesmo handler do CLI/scheduler: Scraper → Extractor → [Compliance Analyzer ‖ Knowledge Builder] → Conformance Validator → Report Consolidator, retornando `PipelineResult` já completo |
 | `POST /reports` | Recebe/reconhece o `ReportOutput` publicado pelo Report Consolidator Agent (SPEC-014) — adicionada durante a revisão de integração entre as duas specs, ver nota abaixo |
 
 **Nota de integração**: `POST /reports` foi adicionada após a implementação
@@ -725,11 +726,14 @@ natural.
 preenchidos, sem um estado "pendente" representável — introduzir uma fila
 de jobs (Celery/RQ) só para viabilizar um fluxo assíncrono seria
 infraestrutura nova sem necessidade real para o volume deste projeto. A
-rota também não aciona uma coleta ao vivo via MCP scraper (SPEC-007/008) —
-isso exigiria um servidor MCP já em execução como dependência externa do
-processo da API; `POST /runs` orquestra os agentes já implementados sobre o
-corpus mock (`fixtures/normativos.json`), documentado explicitamente aqui,
-não como uma lacuna silenciosa.
+rota delega inteiramente a `run_pipeline` (SPEC-015) e por isso aciona, de
+verdade, o Scraper Agent via MCP (SPEC-007/008) sobre o mock do BCB — nunca
+uma segunda implementação simplificada que pulasse Scraper/Extractor. Em
+execução local (`uvicorn ... --reload`), o processo da API sobe sua própria
+cópia efêmera do mock BCB e do servidor MCP (mesmo padrão do `make run`);
+via `docker compose`, `ORCHESTRATOR_BOOTSTRAP_LOCAL_SERVERS=false` faz a
+rota reaproveitar os containers `mock-bcb`/`mcp-scraper` já no ar, mesma
+lógica condicional já estabelecida para o container `scheduler` (SPEC-016).
 
 ```bash
 uvicorn pix_compliance.api.app:app --reload
@@ -775,11 +779,9 @@ dois caminhos de entrada divergentes. O caminho de produção do agendamento
 (EventBridge) fica documentado como IaC em `docs/aws/eventbridge-schedule.tf`,
 sem deploy real (fora de escopo).
 
-**Nota de integração pendente**: `POST /runs` (SPEC-013,
-`src/pix_compliance/api/routes.py`) ainda mantém sua própria orquestração
-inline, criada antes deste módulo existir — delegar a `run_pipeline` em vez
-de manter uma segunda implementação do mesmo fluxo é uma ação de
-acompanhamento registrada, não resolvida nesta spec.
+`POST /runs` (SPEC-013, `src/pix_compliance/api/routes.py`) delega
+inteiramente a `run_pipeline` — mesmo handler do CLI e do scheduler, nunca
+uma segunda implementação do mesmo fluxo.
 
 ```bash
 make run

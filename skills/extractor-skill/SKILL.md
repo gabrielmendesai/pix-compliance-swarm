@@ -14,7 +14,12 @@ chave no `ObjectStore`) em um `NormativoItem` validado. Este agente:
 - Usa o LLM **apenas** para estruturar campos ambíguos que a extração
   determinística não resolve sozinha (ex. limite exato entre dois artigos,
   normalização de uma data escrita por extenso) — nunca para fazer o
-  parsing bruto do documento.
+  parsing bruto do documento, e nunca para gerar `url_origem`/
+  `hash_conteudo`: ambos já vêm prontos e corretos no `RawDocument` de
+  entrada (calculados de verdade pelo Scraper Agent, SPEC-007/008) e são
+  copiados em código após a estruturação — pedir um SHA-256 ao LLM seria
+  pedir para ele alucinar um valor no formato certo, não computá-lo de
+  verdade.
 - Aplica `guard()` (SPEC-004) sobre todo texto extraído, sempre, antes de
   qualquer chamada ao LLM — este é o primeiro ponto do pipeline do enxame
   em que conteúdo de documento realmente chega a um provider de LLM.
@@ -40,7 +45,7 @@ ambiguidade real está na estruturação de campos, que é o papel do LLM.
 ## Input
 
 ```bash
-python -m pix_compliance.agents.extractor_agent <object_store_key> <content_type>
+python -m pix_compliance.agents.extractor_agent <object_store_key> <content_type> <source_uri>
 ```
 
 Dependências injetadas via `RunContext[ExtractorAgentDeps]`:
@@ -49,12 +54,11 @@ Dependências injetadas via `RunContext[ExtractorAgentDeps]`:
 |---|---|---|
 | `object_store` | `ObjectStore` | Reaproveitado da SPEC-006, usado para ler o documento bruto pela chave |
 
-Parâmetros de execução:
-
-| Parâmetro | Tipo | Descrição |
-|---|---|---|
-| `object_store_key` | `str` | Chave do documento bruto no `ObjectStore` (ex. produzida por `fetch_normativo`, SPEC-007) |
-| `content_type` | `str` | `"application/pdf"` ou `"text/html"` — decide qual função de extração usar |
+Parâmetro de execução: um `RawDocument` (SPEC-002) já persistido — via
+`bytes_ref` (chave no `ObjectStore`, ex. produzida por `fetch_normativo`,
+SPEC-007), `content_type` (`"application/pdf"` ou `"text/html"`, decide qual
+função de extração usar), `source_uri` e `hash_conteudo` (já calculados de
+verdade pelo Scraper Agent, reaproveitados sem recomputação — ver Output).
 
 ## Output
 
@@ -63,7 +67,9 @@ SPEC-002, `ConfigDict(extra="forbid", frozen=True)`) — reaproveitado sem
 alteração de contrato. Este agente preenche todos os campos obrigatórios,
 incluindo `categoria` (um único valor por documento, atribuído como parte da
 estruturação geral via LLM — distinto da categorização de regras individuais,
-fora de escopo desta feature).
+fora de escopo desta feature). `url_origem`/`hash_conteudo` são a única
+exceção: nunca vêm do LLM, são copiados diretamente do `RawDocument` de
+entrada depois da estruturação.
 
 ## Tratamento de erro de dependência externa e resiliência
 

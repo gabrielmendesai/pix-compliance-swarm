@@ -26,9 +26,6 @@ from tests.test_scraper_agent import (  # noqa: F401
     running_mcp_server,
 )
 
-_FAKE_HASH = "a" * 64
-
-
 _VOLATILE_ENV_KEYS = {"BCB_BASE_URL", "MCP_SCRAPER_HOST", "MCP_SCRAPER_PORT"}
 
 
@@ -90,8 +87,6 @@ def _generic_valid_extractor_decision():
             "data_publicacao": "2024-01-01",
             "data_vigencia": "2024-01-01",
             "categoria": "liquidação",
-            "url_origem": "https://mock-bcb.local/normativo",
-            "hash_conteudo": _FAKE_HASH,
             "versao": 1,
         }
         return ModelResponse(parts=[ToolCallPart(tool_name=output_tool_name, args=args)])
@@ -251,8 +246,6 @@ class TestPipelineCompleto:
                 "data_publicacao": "2024-01-01",
                 "data_vigencia": "2024-01-01",
                 "categoria": "liquidação",
-                "url_origem": "https://mock-bcb.local/normativo",
-                "hash_conteudo": _FAKE_HASH,
                 "versao": 1,
             }
             return ModelResponse(parts=[ToolCallPart(tool_name=output_tool_name, args=args)])

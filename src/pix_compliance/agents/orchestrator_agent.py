@@ -411,8 +411,7 @@ async def _executar_etapas(
                 run_extractor_agent,
                 settings,
                 context.object_store,
-                documento.bytes_ref,
-                documento.content_type,
+                documento,
                 model_extractor,
             )
             normativos.append(normativo)

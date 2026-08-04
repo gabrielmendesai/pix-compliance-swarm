@@ -57,3 +57,4 @@ app.add_exception_handler(ObjectNotFoundError, not_found_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(router)
+# mudança trivial 3 (verificação de cache do pip)

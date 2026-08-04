@@ -14,7 +14,7 @@ lint:
 	ruff check .
 
 up:
-	@echo "up: conteinerização chega na SPEC-016 — alvo reservado, sem efeito ainda"
+	docker compose up -d
 
 down:
-	@echo "down: conteinerização chega na SPEC-016 — alvo reservado, sem efeito ainda"
+	docker compose down

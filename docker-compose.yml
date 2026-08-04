@@ -32,6 +32,152 @@ services:
       timeout: 5s
       retries: 10
 
+  # SPEC-016: serve mock_bcb/ (SPEC-003) via a stdlib http.server — mesmo
+  # mecanismo já usado em tests/conftest.py e em
+  # orchestrator_agent.py::_start_mock_bcb_server, sem justificar uma
+  # imagem custom (Princípio II, YAGNI — ver research.md, Decisão 1).
+  mock-bcb:
+    image: python:3.12-slim
+    working_dir: /mock_bcb
+    volumes:
+      - ./mock_bcb:/mock_bcb:ro
+    command: ["python", "-m", "http.server", "8080"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # SPEC-016: serviço de execução única — cria o bucket do object storage
+  # (idempotente) e aplica a migration do pgvector (idempotente) antes de
+  # api/scheduler subirem. Reaproveita a imagem "api" (já tem boto3/
+  # psycopg instalados) em vez de um quarto estágio só para isso
+  # (research.md, Decisão 3).
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    env_file: .env
+    environment:
+      POSTGRES_DSN: postgresql://pix:pix@postgres:5432/pix_compliance
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+    command: ["python", "scripts/bootstrap.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  mcp-scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mcp-scraper
+    env_file: .env
+    environment:
+      # 0.0.0.0, não 127.0.0.1: o servidor precisa aceitar conexões de
+      # outros containers (api/scheduler), não apenas de si mesmo.
+      MCP_SCRAPER_HOST: 0.0.0.0
+      BCB_BASE_URL: http://mock-bcb:8080
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+    ports:
+      - "8100:8100"
+    depends_on:
+      mock-bcb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('localhost', 8100), timeout=3).close()",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    env_file: .env
+    environment:
+      POSTGRES_DSN: postgresql://pix:pix@postgres:5432/pix_compliance
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: scheduler
+    env_file: .env
+    environment:
+      POSTGRES_DSN: postgresql://pix:pix@postgres:5432/pix_compliance
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      BCB_BASE_URL: http://mock-bcb:8080
+      MCP_SCRAPER_HOST: mcp-scraper
+      API_URL: http://api:8000
+      # mock-bcb/mcp-scraper já são containers próprios aqui — desabilita
+      # o padrão efêmero da SPEC-015 (evita colisão de porta,
+      # research.md, Decisão 5).
+      ORCHESTRATOR_BOOTSTRAP_LOCAL_SERVERS: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mock-bcb:
+        condition: service_healthy
+      mcp-scraper:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # Sem ferramentas extras (pgrep/curl): confirma que um processo com
+      # "orchestrator_agent" na linha de comando está de fato rodando,
+      # lendo /proc diretamente (sempre disponível em containers Linux).
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib,sys; procs=[open(f'/proc/{p.name}/cmdline').read() for p in pathlib.Path('/proc').iterdir() if p.name.isdigit()]; sys.exit(0 if any('orchestrator_agent' in p for p in procs) else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   minio_data:

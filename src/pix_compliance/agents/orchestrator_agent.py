@@ -212,7 +212,7 @@ def _resultado_travado(request: PipelineRequest, iniciado_em: datetime) -> Pipel
 async def run_pipeline(
     request: PipelineRequest,
     *,
-    bootstrap_local_servers: bool = True,
+    bootstrap_local_servers: bool | None = None,
     model_scraper: Model | None = None,
     model_extractor: Model | None = None,
     model_analyzer: Model | None = None,
@@ -223,12 +223,16 @@ async def run_pipeline(
     (`make run`) e pelo `APScheduler` (`start_scheduler`), nunca dois
     caminhos de entrada divergentes (FR-008).
 
-    `bootstrap_local_servers=True` (default, usado pelo CLI/scheduler)
-    sobe o mock BCB e o servidor MCP em processo antes de `scrape`, e os
-    derruba no `finally`. Testes que já controlam suas próprias instâncias
-    (via fixtures existentes, ex. `mock_bcb_server`/`running_mcp_server`)
-    passam `bootstrap_local_servers=False` para não colidir de porta.
-    """
+    `bootstrap_local_servers=None` (default) usa
+    `settings.orchestrator_bootstrap_local_servers` (SPEC-016, `True` por
+    padrão em execução local) para decidir se sobe o mock BCB e o servidor
+    MCP em processo antes de `scrape`, derrubando-os no `finally`. O
+    container `scheduler` do compose define essa variável de ambiente como
+    `False`, já que `mock-bcb`/`mcp-scraper` já existem como containers
+    próprios ali (evita colisão de porta). Testes que já controlam suas
+    próprias instâncias (via fixtures existentes, ex. `mock_bcb_server`/
+    `running_mcp_server`) continuam passando `bootstrap_local_servers=False`
+    explicitamente, o que sempre tem prioridade sobre a configuração."""
     from pix_compliance.config import settings as default_settings
 
     iniciado_em = datetime.now()
@@ -240,6 +244,12 @@ async def run_pipeline(
         settings = default_settings
         correlation_id = bind_run_correlation_id()
         logger.info("orchestrator_pipeline_iniciado", pipeline_id=request.pipeline_id)
+
+        resolved_bootstrap_local_servers = (
+            settings.orchestrator_bootstrap_local_servers
+            if bootstrap_local_servers is None
+            else bootstrap_local_servers
+        )
 
         object_store = S3ObjectStore(settings)
         vector_store = PgVectorStore(settings)
@@ -254,7 +264,7 @@ async def run_pipeline(
 
         bcb_server = mcp_server = None
         bcb_thread = mcp_thread = None
-        if bootstrap_local_servers:
+        if resolved_bootstrap_local_servers:
             bcb_server, bcb_thread = _start_mock_bcb_server(settings)
             mcp_server, mcp_thread = _start_mcp_server(settings)
 
@@ -279,7 +289,7 @@ async def run_pipeline(
                 etapas=etapas,
             )
         finally:
-            if bootstrap_local_servers:
+            if resolved_bootstrap_local_servers:
                 if mcp_server is not None:
                     mcp_server.should_exit = True
                     mcp_thread.join(timeout=5)
@@ -427,11 +437,25 @@ def start_scheduler(settings: Settings, trigger: BaseTrigger | None = None) -> A
     return scheduler
 
 
+async def _run_daemon(settings: Settings) -> None:
+    """Mantém o processo vivo rodando o scheduler continuamente — usado
+    pelo container `scheduler` do docker-compose (SPEC-016), que precisa
+    de um processo de longa duração, não uma execução única que termina
+    (diferente do disparo ad-hoc via `make run`)."""
+    start_scheduler(settings)
+    await asyncio.Event().wait()
+
+
 if __name__ == "__main__":
+    import sys
+
     from pix_compliance.config import settings as default_settings
 
-    _request = PipelineRequest(
-        pipeline_id=uuid.uuid4().hex, fontes=[default_settings.bcb_base_url]
-    )
-    _resultado = asyncio.run(run_pipeline(_request))
-    print(_resultado.model_dump_json(indent=2))
+    if "--daemon" in sys.argv:
+        asyncio.run(_run_daemon(default_settings))
+    else:
+        _request = PipelineRequest(
+            pipeline_id=uuid.uuid4().hex, fontes=[default_settings.bcb_base_url]
+        )
+        _resultado = asyncio.run(run_pipeline(_request))
+        print(_resultado.model_dump_json(indent=2))

@@ -441,3 +441,36 @@ make run
 pytest tests/test_orchestrator_agent.py -q
 cat docs/evidence/pipeline-run.log
 ```
+
+## Conteinerização (`Dockerfile`, `docker-compose.yml`, `scripts/`)
+
+Um único `Dockerfile` multi-stage (estágio `builder` compartilhado + três
+estágios finais — `api`, `mcp-scraper`, `scheduler`) sobe o sistema inteiro
+via `docker compose`, sem passo manual (SPEC-016). Os serviços definidos em
+`docker-compose.yml`:
+
+- `postgres`/`minio` — já existentes desde a SPEC-006.
+- `mock-bcb` — serve `mock_bcb/` (SPEC-003) via `http.server`, mesmo
+  mecanismo já usado em `tests/conftest.py`/`orchestrator_agent.py`.
+- `bootstrap` — serviço de execução única: cria o bucket do object storage
+  e aplica a migration do pgvector (ambos idempotentes), antes de
+  `api`/`scheduler` subirem (`depends_on: condition:
+  service_completed_successfully`).
+- `mcp-scraper` — servidor MCP do Scraper Agent (SPEC-007/008), agora como
+  serviço próprio em vez de subir em processo dentro do orchestrator.
+- `api` — API FastAPI (SPEC-013).
+- `scheduler` — Orchestrator Agent rodando com a nova flag `--daemon`
+  (agendamento via `APScheduler`, sem servidor HTTP), com
+  `ORCHESTRATOR_BOOTSTRAP_LOCAL_SERVERS=false` porque `mock-bcb`/
+  `mcp-scraper` já são containers próprios aqui.
+
+```bash
+docker compose up -d              # subida completa, a partir de um checkout limpo
+scripts/verify_containerization.sh              # cenários 1 e 2: todos os serviços saudáveis, /docs OK, handshake do mcp-scraper OK
+scripts/verify_containerization.sh --full-reset # cenário 3: down -v && up -d reproduz o mesmo estado, sem intervenção manual
+```
+
+`make up`/`make down` chamam `docker compose up -d`/`docker compose down`
+diretamente. `scripts/bootstrap.py` reaproveita `S3ObjectStore` (SPEC-006,
+`_ensure_bucket()` idempotente) e a migration já existente (`CREATE ... IF
+NOT EXISTS`) — seguro rodar mais de uma vez, inclusive após um `down -v`.

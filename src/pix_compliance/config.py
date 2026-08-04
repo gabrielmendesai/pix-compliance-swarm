@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     # (FR-008), nunca um segundo caminho de entrada.
     orchestrator_schedule_cron: str = "0 3 * * *"
 
+    # SPEC-016: quando True (default, execução local fora de container),
+    # run_pipeline sobe suas próprias cópias efêmeras do mock BCB e do
+    # servidor MCP (research.md da SPEC-015). O container `scheduler` do
+    # docker-compose define esta variável como False, porque `mock-bcb`/
+    # `mcp-scraper` já existem como containers próprios nesse ambiente —
+    # sem isso, o Orchestrator tentaria subir um segundo servidor na mesma
+    # porta já ocupada pelo container correspondente.
+    orchestrator_bootstrap_local_servers: bool = True
+
     @property
     def embedding_dimension(self) -> int:
         """Dimensão do vetor de embedding, travada em `EMBEDDING_DIMENSION`

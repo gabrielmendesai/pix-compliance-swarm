@@ -1,0 +1,32 @@
+# SPEC-016: exclui do contexto de build tudo que não é necessário para
+# instalar dependências e rodar a aplicação — build mais rápido, imagem
+# final sem lixo de desenvolvimento.
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.git/
+.gitignore
+
+# Testes/documentação/evidência não precisam estar dentro da imagem —
+# reduzem o contexto de build sem afetar o runtime da aplicação.
+tests/
+docs/
+specs/
+.specify/
+.claude/
+*.md
+!README.md
+
+# Segredos/estado local — nunca devem ir para dentro de uma imagem.
+.env
+reports/
+
+# Artefatos de IDE/OS irrelevantes ao build.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

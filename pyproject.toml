@@ -41,7 +41,7 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests", "fixtures", "mcp_servers"]
+src = ["src", "tests", "fixtures", "mcp_servers", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

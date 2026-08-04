@@ -2,6 +2,351 @@
 
 Enxame de agentes Pydantic AI para compliance de normativos PIX fictícios do BCB.
 
+## Visão geral
+
+O PIX Compliance Swarm coleta normativos fictícios do BCB sobre o arranjo PIX, extrai regras
+estruturadas de cada um, analisa conformidade contra a versão anterior de cada normativo, e
+consolida um relatório de gaps — tudo orquestrado por um enxame de sete agentes Pydantic AI
+(seis agentes especializados mais um "harness" de orquestração determinística), sem nenhuma
+lógica de negócio duplicada entre eles.
+
+O projeto nasceu como desafio técnico para a vaga de AI Engineer Sênior na Verity, com prazo
+de 4 dias, e foi desenvolvido inteiramente via metodologia *spec-driven* (GitHub Spec Kit) —
+cada uma das dezoito specs numeradas (`specs/001-*` a `specs/018-*`) define contrato, testes,
+e critérios de aceite antes do código correspondente ser escrito (ver "Metodologia de
+especificação" abaixo). O resultado é auditável ponta a ponta: toda decisão de arquitetura
+não óbvia está documentada em prosa (nos `research.md` de cada spec, ou em
+`docs/architecture.md`), não apenas implícita no código.
+
+Os dados são inteiramente fictícios (BCB/PIX fictício para fins do desafio) — nenhuma
+integração real com o Banco Central ou com o arranjo PIX de produção.
+
+## Dependências e requisitos
+
+- **Python 3.11+** (`requires-python` em `pyproject.toml`).
+- **Docker + Docker Compose v2** — para `postgres` (com `pgvector`), `minio`, e, opcionalmente,
+  o stack completo em container (SPEC-016).
+- **Credenciais AWS com acesso ao Amazon Bedrock** — apenas para execução real
+  (`LLM_PROVIDER=bedrock`, o caminho de produção); a suíte de testes roda inteiramente sem
+  elas (`LLM_PROVIDER=offline`, SPEC-005/017).
+- Bibliotecas Python principais (ver `pyproject.toml` para a lista completa e versões
+  mínimas): `pydantic`/`pydantic-settings`, `pydantic-ai-slim[bedrock,mcp]`, `anthropic[bedrock]`,
+  `fastapi`/`uvicorn`, `boto3`/`botocore`, `psycopg`/`pgvector`, `apscheduler`, `structlog`,
+  `mcp` (SDK do Model Context Protocol), `pdfplumber`/`beautifulsoup4` (extração), `reportlab`
+  (geração de PDF).
+
+## Instalação e variáveis de ambiente
+
+```bash
+git clone <url-do-repositório>
+cd pix-compliance-swarm
+cp .env.example .env
+# preencher .env: no mínimo AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_REGION
+# (para execução real via Bedrock) — .env.example documenta cada variável
+# inline, com o valor padrão já correto para o stack local (Postgres/MinIO
+# do docker-compose.yml)
+make install
+```
+
+`make install` cria um virtualenv (`.venv/`) e instala o projeto em modo editável com as
+dependências de desenvolvimento (`pip install -e ".[dev]"`).
+
+Variáveis de ambiente obrigatórias (`Settings` falha com uma mensagem acionável se qualquer
+uma faltar — nunca um traceback cru, FR-004 da SPEC-001) — resumo; `.env.example` documenta
+cada uma com o racional completo:
+
+| Variável | Propósito |
+|---|---|
+| `LLM_PROVIDER` | `bedrock` (produção) ou `offline` (só suíte de testes) |
+| `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION` | Credenciais AWS para o Bedrock |
+| `BEDROCK_MODEL_ID`/`BEDROCK_EMBEDDINGS_MODEL_ID` | Modelos de chat/embeddings no Bedrock |
+| `POSTGRES_DSN` | Conexão com o Postgres/pgvector |
+| `OBJECT_STORAGE_ENDPOINT`/`OBJECT_STORAGE_ACCESS_KEY`/`OBJECT_STORAGE_SECRET_KEY`/`OBJECT_STORAGE_BUCKET` | Object storage (MinIO local ou S3 real) |
+| `BCB_BASE_URL`/`MCP_SCRAPER_HOST`/`MCP_SCRAPER_PORT` | Site mock do BCB e servidor MCP do Scraper |
+| `API_URL` | URL da própria API (usada pelo Report Consolidator como cliente HTTP) |
+
+## Como executar
+
+Com o Postgres/MinIO locais no ar (`make up`, ou os serviços equivalentes via
+`docker compose up postgres minio -d`) e `.env` preenchido:
+
+```bash
+# Pipeline completo (scraping -> extração -> análise -> consolidação), ad-hoc:
+make run
+
+# Mesmo pipeline, agendado via APScheduler (cron em ORCHESTRATOR_SCHEDULE_CRON),
+# como processo de longa duração (mesmo comando usado pelo container `scheduler`):
+python -m pix_compliance.agents.orchestrator_agent --daemon
+
+# API (rotas incluindo POST /runs, que dispara o mesmo run_pipeline via HTTP):
+uvicorn pix_compliance.api.app:app --reload
+# Swagger: http://localhost:8000/docs
+
+# Suíte de testes completa (roda offline, sem credenciais AWS — SPEC-017):
+make test
+```
+
+`make run` sobe, em processo, uma cópia efêmera do mock BCB e do servidor MCP do Scraper —
+nenhum serviço adicional precisa estar rodando manualmente para uma execução completa de
+ponta a ponta fora do Docker (só Postgres/MinIO).
+
+## Como subir via Docker
+
+```bash
+cp .env.example .env   # preencher as credenciais AWS
+docker compose up -d
+docker compose ps      # todos os serviços devem ficar "healthy"
+```
+
+Sobe o stack inteiro (`postgres`, `minio`, `mock-bcb`, `bootstrap`, `mcp-scraper`, `api`,
+`scheduler`) a partir de um repositório limpo, sem nenhum passo manual — incluindo a criação
+do bucket e a aplicação da migration do `pgvector` (serviço `bootstrap`, SPEC-016). Detalhes
+completos (multi-stage build, healthchecks, o script de verificação
+`scripts/verify_containerization.sh`) na seção "Conteinerização" mais abaixo.
+
+```bash
+docker compose down -v && docker compose up -d   # reset completo, mesmo resultado
+```
+
+## Integração com servidores MCP
+
+O Scraper Agent nunca acessa o site do BCB diretamente — toda coleta passa por um servidor
+MCP dedicado (`mcp_servers/scraper_sse/`, transporte SSE, SPEC-007), que expõe três
+ferramentas (`list_normativos`, `fetch_normativo`, `detect_changes`) sobre um `Fetcher`
+genérico e um `Adapter` específico do site mock. O agente se conecta a esse servidor via
+`MCPToolset` (Pydantic AI), nunca por import direto de função — o mesmo protocolo que um
+cliente MCP real (ex. Claude Desktop) usaria.
+
+- **Local (`make run`)**: o Orchestrator sobe sua própria cópia efêmera do servidor MCP em
+  processo, em porta escolhida dinamicamente pelo sistema operacional (SPEC-017 — evita
+  conflito de porta entre execuções).
+- **Docker (`docker compose up -d`)**: o servidor MCP roda como o serviço `mcp-scraper`,
+  container próprio, porta `8100` publicada no host (SPEC-016).
+- **Conectar um cliente MCP externo**: `mcp_servers/scraper_sse/server.py` expõe transporte
+  SSE padrão — qualquer cliente MCP compatível (não só o Scraper Agent) pode se conectar em
+  `http://<host>:<porta>/sse` e listar/chamar as três ferramentas.
+
+## Desenvolvimento e ferramentas
+
+Seção de transparência (item 11 do desafio original) — como este projeto foi de fato
+desenvolvido, sem narrativa idealizada.
+
+### Forma de desenvolvimento adotada
+
+Desenvolvimento assistido por IA (Claude Code) com revisão humana em cada etapa — não geração
+autônoma sem supervisão. O fluxo seguido para cada uma das dezoito specs foi: `/speckit-specify`
+(spec.md, revisado antes de prosseguir) → `/speckit-plan` (research.md/data-model.md/contracts/,
+com "Constitution Check" contra os 9 princípios) → `/speckit-tasks` (tasks.md, tarefas de teste
+antes das de implementação) → `/speckit-implement` (execução tarefa a tarefa, com testes
+confirmados falhos antes do código correspondente existir — Princípio IX). Dois desvios reais
+dessa ordem aconteceram (SPEC-011, implementada fora de ordem; SPEC-017, ordem parcialmente
+invertida por ser uma feature sobre os próprios testes) — detalhados em
+[`docs/spec-methodology.md`](docs/spec-methodology.md), não escondidos.
+
+A auditoria de gaps da SPEC-017 é o exemplo mais concreto de "revisão humana no loop": em vez
+de assumir que a suíte estava completa porque cada spec teve seus próprios testes, essa spec
+rodou a suíte inteira, auditou cobertura de `models.py`/`guardrails.py`, e encontrou (e
+corrigiu) um bug real de PII (e-mail de um caractere detectado mas não mascarado) que nenhum
+teste anterior havia coberto.
+
+### Skills e recursos consultados
+
+- Documentação oficial do [Pydantic AI](https://ai.pydantic.dev/) (agentes, `RunContext`,
+  `MCPToolset`, `TestModel`/`FunctionModel` para testes determinísticos).
+- Documentação da [Messages API da Anthropic via Amazon Bedrock](https://docs.anthropic.com/)
+  (superfície usada por `BedrockChatProvider`, `src/pix_compliance/llm_provider.py`).
+- Especificação do [Model Context Protocol](https://modelcontextprotocol.io/) (SDK `mcp`,
+  transporte SSE).
+- [GitHub Spec Kit](https://github.com/github/spec-kit) — metodologia spec-driven usada em
+  todo o projeto (ver "Metodologia de especificação" abaixo).
+- As sete `skills/*-skill/SKILL.md` deste próprio repositório — cada uma documentando o
+  contrato do agente correspondente, consultadas pelo Claude Code durante a implementação de
+  cada spec subsequente que dependia daquele agente.
+
+### Métodos de orquestração no enxame
+
+| Padrão | Onde aparece | O quê |
+|---|---|---|
+| **Sequencial** | `orchestrator_agent.py::_executar_etapas` — `scrape → extract` | O Extractor depende do documento já coletado pelo Scraper; não há como estruturar um `NormativoItem` sem o texto bruto baixado. |
+| **Paralelo** | `orchestrator_agent.py::_executar_etapas` — `compliance_analyzer ‖ knowledge_builder` (via `asyncio.gather`) | Ambos partem do mesmo `NormativoItem` já extraído, sem depender um do resultado do outro — categorizar regras e indexar embeddings são leituras independentes do mesmo dado. |
+| **Loop com condição** | `extractor_agent.py` — loop de reparo de validação (linhas ~173–210) | Até 2 tentativas de estruturar um `NormativoItem` válido a partir do texto bruto — se a 1ª falhar a validação Pydantic, a 2ª tentativa recebe o erro explícito como contexto adicional; nunca uma 3ª tentativa. |
+| **Delegação agente-para-agente via ferramenta** | `scraper_agent.py` → servidor MCP (`mcp_servers/scraper_sse/`) | O Scraper Agent delega a coleta a um servidor MCP separado via chamada de ferramenta real (protocolo MCP), não por import direto de função. |
+
+### Diferenciais explorados
+
+- **Amazon Bedrock** como único provider LLM de produção (Princípio I da constituição) — duas
+  superfícies de integração distintas usadas deliberadamente (Messages API via SDK `anthropic`
+  para chat com modelos recentes; `boto3`/`invoke_model` para embeddings Titan, que não têm
+  equivalente na Messages API) — ver seção "Provider LLM e embeddings via Amazon Bedrock" mais
+  abaixo.
+- **`pgvector` sobre PostgreSQL** em vez de um serviço gerenciado de busca vetorial dedicado —
+  decisão de arquitetura documentada e justificada em [`docs/architecture.md`](docs/architecture.md)
+  (ADR-01).
+- **Conteinerização com bootstrap idempotente** (SPEC-016) — `docker compose up -d` a partir
+  de um repositório limpo, sem nenhum passo manual (criação de bucket, aplicação de migration),
+  mesmo em resets completos (`down -v && up -d`).
+- **Constituição do projeto** (`.specify/memory/constitution.md`, 9 princípios) como mecanismo
+  de governança ativo, não decorativo — cada plano de implementação passa por um "Constitution
+  Check" explícito antes e depois do design.
+
+## Arquitetura
+
+Três diagramas Mermaid (renderizam nativamente na página do GitHub, sem ferramenta externa),
+cada um respondendo a uma pergunta específica: o que existe (container), como o enxame
+processa uma execução (componente), e como cada peça fala com a AWS (integrações).
+
+### Visão de container (C4)
+
+```mermaid
+flowchart TB
+    subgraph enxame["Enxame de agentes (processo Python)"]
+        scraper["Scraper Agent"]
+        extractor["Extractor Agent"]
+        analyzer["Compliance Analyzer Agent"]
+        kb["Knowledge Builder Agent"]
+        validator["Conformance Validator Agent"]
+        consolidator["Report Consolidator Agent"]
+        orchestrator["Orchestrator (Harness)"]
+    end
+
+    api["API FastAPI"]
+    mcp["Servidor MCP do Scraper (SSE)"]
+    pg[("Postgres + pgvector")]
+    minio[("MinIO / S3")]
+    bedrock["Amazon Bedrock"]
+    bcb["Site mock do BCB"]
+
+    orchestrator --> scraper
+    orchestrator --> extractor
+    orchestrator --> analyzer
+    orchestrator --> kb
+    orchestrator --> validator
+    orchestrator --> consolidator
+
+    scraper -- "protocolo MCP" --> mcp
+    mcp -- "HTTP" --> bcb
+    mcp --> minio
+
+    extractor --> minio
+    kb --> pg
+    validator --> pg
+    consolidator --> minio
+    consolidator -- "publica relatório" --> api
+
+    scraper -.-> bedrock
+    extractor -.-> bedrock
+    analyzer -.-> bedrock
+    kb -.-> bedrock
+    validator -.-> bedrock
+
+    api --> pg
+    api --> minio
+```
+
+### Componente do enxame — pipeline do Orchestrator
+
+Os três padrões de orquestração avaliados pelo desafio, anotados diretamente no fluxo (ver
+também "Métodos de orquestração no enxame", na seção "Desenvolvimento e ferramentas"):
+
+```mermaid
+flowchart LR
+    scrape["scrape\n(Scraper Agent)"]
+    extract["extract\n(Extractor Agent)"]
+    reparo{"NormativoItem\nválido?"}
+    analyzer["compliance_analyzer"]
+    kb["knowledge_builder"]
+    validator["conformance_validator"]
+    consolidator["report_consolidator"]
+
+    scrape -- "sequencial" --> extract
+    extract --> reparo
+    reparo -- "não (até 2x)\nloop com condição" --> extract
+    reparo -- "sim" --> analyzer
+    reparo -- "sim" --> kb
+    analyzer -- "paralelo" --> validator
+    kb -. "paralelo, sem\ndependência de analyzer" .-> validator
+    validator -- "sequencial" --> consolidator
+```
+
+### Integrações AWS
+
+```mermaid
+flowchart TB
+    subgraph agentes["Agentes que usam LLM/embeddings"]
+        scraper["Scraper"]
+        extractor["Extractor"]
+        analyzer["Compliance Analyzer"]
+        kb["Knowledge Builder"]
+        validator["Conformance Validator"]
+    end
+
+    subgraph bedrock["Amazon Bedrock"]
+        chat["Chat (Messages API via anthropic SDK)\nClaude Haiku 4.5+"]
+        embed["Embeddings (boto3/invoke_model)\nTitan Text Embeddings V2"]
+    end
+
+    objectstore["S3 / MinIO\n(ObjectStore)"]
+    vectorstore["Postgres + pgvector\n(PgVectorStore)"]
+
+    scraper -.-> chat
+    extractor -.-> chat
+    analyzer -.-> chat
+    validator -.-> chat
+    kb -.-> embed
+
+    scraper --> objectstore
+    extractor --> objectstore
+    kb --> vectorstore
+```
+
+## Skills do enxame
+
+Um `SKILL.md` por agente (formato uniforme: Responsabilidade, Ferramentas, Input, Output —
+estabelecido por `scraper-skill` e seguido pelos seis seguintes, padrão similar ao workspace
+ADK citado pelo desafio original):
+
+| Agente | Skill | Spec |
+|---|---|---|
+| Scraper Agent | [`skills/scraper-skill/SKILL.md`](skills/scraper-skill/SKILL.md) | SPEC-008 |
+| Extractor Agent | [`skills/extractor-skill/SKILL.md`](skills/extractor-skill/SKILL.md) | SPEC-009 |
+| Compliance Analyzer Agent | [`skills/compliance-analyzer-skill/SKILL.md`](skills/compliance-analyzer-skill/SKILL.md) | SPEC-010 |
+| Conformance Validator Agent | [`skills/conformance-validator-skill/SKILL.md`](skills/conformance-validator-skill/SKILL.md) | SPEC-011 |
+| Knowledge Builder Agent | [`skills/knowledge-builder-skill/SKILL.md`](skills/knowledge-builder-skill/SKILL.md) | SPEC-012 |
+| Report Consolidator Agent | [`skills/report-consolidator-skill/SKILL.md`](skills/report-consolidator-skill/SKILL.md) | SPEC-014 |
+| Orchestrator (Harness) | [`skills/orchestrator-skill/SKILL.md`](skills/orchestrator-skill/SKILL.md) | SPEC-015 |
+
+## Metodologia de especificação
+
+Todo o projeto foi desenvolvido via *spec-driven development* usando o
+[GitHub Spec Kit](https://github.com/github/spec-kit) — dezoito specs numeradas
+(`specs/001-*` a `specs/018-*`), cada uma com `spec.md`/`plan.md`/`research.md`/`tasks.md`
+próprios, seguindo um fluxo fixo de comandos (`/speckit-specify` → `/speckit-plan` →
+`/speckit-tasks` → `/speckit-implement`) e governadas por nove princípios registrados em
+[`.specify/memory/constitution.md`](.specify/memory/constitution.md). Detalhes completos —
+por que escopo negativo explícito, o papel do `constitution.md`/`CLAUDE.md`, e os dois
+desvios reais do Princípio IX que aconteceram de fato — em
+[`docs/spec-methodology.md`](docs/spec-methodology.md).
+
+## Mapeamento dos 11 entregáveis do desafio original
+
+Tabela de rastreabilidade direta — cada entregável exigido pela seção 5 do desafio original
+apontando para onde ele está neste repositório. Itens 7–11 são o objeto desta seção de
+documentação (SPEC-018); os demais já existiam antes dela e são só referenciados aqui.
+
+| # | Entregável | Onde está |
+|---|---|---|
+| 1 | Código-fonte (boas práticas Git, agente Pydantic AI, modelos, MCP, API FastAPI, Docker/compose, guardrail) | `src/pix_compliance/`, `mcp_servers/`, `Dockerfile`, `docker-compose.yml`, histórico de commits |
+| 2 | Modelos Pydantic de exemplo (`NormativoItem`, `ConformanceReport`, modelos da API) | `src/pix_compliance/models.py`; `docs/schemas/*.schema.json` |
+| 3 | Fixture com ≥50 normativos fictícios | `fixtures/normativos.json` (53 itens) |
+| 4 | ≥3 documentos PDF/HTML mock | `fixtures/documents/` (4 normativos, PDF + HTML cada) |
+| 5 | Evidência de funcionamento (logs, screenshots, vídeo) | `docs/evidence/pipeline-run.log` (logs); screenshots/vídeo — ver `docs/evidence/README.md` |
+| 6 | Evidência da API (`/docs`, exemplos de request/response) | `src/pix_compliance/api/routes.py` (todo endpoint documentado com exemplo, `tests/test_api.py::test_openapi_schema_tem_descricao_e_exemplo_em_toda_rota`); screenshot do Swagger — ver `docs/evidence/README.md` |
+| 7 | Diagrama de arquitetura (Mermaid, C4) | Seção "Arquitetura" abaixo — 3 diagramas (container, componente do enxame, integrações AWS) |
+| 8 | `SKILL.md` por agente especializado | Seção "Skills do enxame" abaixo; arquivos em `skills/*/SKILL.md` (7 agentes) |
+| 9 | Plano de especificação (metodologia spec-driven) | Seção "Metodologia de especificação" abaixo; [`docs/spec-methodology.md`](docs/spec-methodology.md) |
+| 10 | README da solução | Este arquivo |
+| 11 | Seção de transparência "Desenvolvimento e ferramentas" | Seção "Desenvolvimento e ferramentas" abaixo |
+
 ## Fixtures: `documents/` vs `normativos.json`
 
 O projeto mantém dois corpora de fixture com propósitos deliberadamente

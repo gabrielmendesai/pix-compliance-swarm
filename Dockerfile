@@ -44,6 +44,12 @@ COPY fixtures/ ./fixtures/
 # builder só para um script de execução única (Princípio III).
 COPY scripts/ ./scripts/
 COPY migrations/ ./migrations/
+# `/app` nasce owned by root (WORKDIR/COPY rodam antes do USER abaixo) —
+# sem este chown, `appuser` não tem permissão de escrita no CWD, e
+# `run_pipeline` (Report Consolidator, SPEC-014) falha com
+# `PermissionError: [Errno 13] Permission denied: 'reports'` ao criar
+# `reports/` (caminho relativo) na primeira execução dentro do container.
+RUN chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
@@ -58,6 +64,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 WORKDIR /app
 COPY src/ ./src/
 COPY mcp_servers/ ./mcp_servers/
+RUN chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8100
@@ -72,6 +79,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 WORKDIR /app
 COPY src/ ./src/
 COPY mock_bcb/ ./mock_bcb/
+RUN chown -R appuser:appuser /app
 USER appuser
 
 CMD ["python", "-m", "pix_compliance.agents.orchestrator_agent", "--daemon"]

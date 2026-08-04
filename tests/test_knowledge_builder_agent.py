@@ -17,31 +17,11 @@ from datetime import date
 import pytest
 
 from pix_compliance.models import CategoriaCompliance, NormativoItem
-
-REQUIRED_ENV = {
-    "AWS_ACCESS_KEY_ID": "AKIAFAKEEXAMPLE",
-    "AWS_SECRET_ACCESS_KEY": "fake-secret",
-    "AWS_REGION": "us-east-1",
-    "BEDROCK_MODEL_ID": "anthropic.claude-3-fake",
-    "BEDROCK_EMBEDDINGS_MODEL_ID": "amazon.titan-embed-fake",
-    "API_URL": "http://localhost:8000",
-    "POSTGRES_DSN": "postgresql://pix:pix@localhost:5432/pix_compliance",
-    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
-    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
-    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
-    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
-    "BCB_BASE_URL": "http://localhost:8080",
-    "MCP_SCRAPER_HOST": "127.0.0.1",
-    "MCP_SCRAPER_PORT": "8100",
-    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
-    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
-    "LLM_PROVIDER": "offline",
-}
+from tests.conftest import settings_for_test
 
 
 def _settings(monkeypatch):
-    for key, value in REQUIRED_ENV.items():
-        monkeypatch.setenv(key, value)
+    settings = settings_for_test(monkeypatch)
 
     # `get_embeddings_provider()` (SPEC-005) decide bedrock/offline a partir
     # do singleton `pix_compliance.config.settings`, não do parâmetro
@@ -57,9 +37,7 @@ def _settings(monkeypatch):
 
     importlib.reload(provider_module)
 
-    from pix_compliance.config import Settings
-
-    return Settings(_env_file=None)
+    return settings
 
 
 @pytest.fixture

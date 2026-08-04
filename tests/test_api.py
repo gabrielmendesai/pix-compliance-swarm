@@ -14,31 +14,9 @@ from pathlib import Path
 
 import pytest
 
-REQUIRED_ENV = {
-    "AWS_ACCESS_KEY_ID": "AKIAFAKEEXAMPLE",
-    "AWS_SECRET_ACCESS_KEY": "fake-secret",
-    "AWS_REGION": "us-east-1",
-    "BEDROCK_MODEL_ID": "anthropic.claude-3-fake",
-    "BEDROCK_EMBEDDINGS_MODEL_ID": "amazon.titan-embed-fake",
-    "API_URL": "http://mock-api.local",
-    "POSTGRES_DSN": "postgresql://pix:pix@localhost:5432/pix_compliance",
-    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
-    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
-    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
-    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
-    "BCB_BASE_URL": "http://localhost:8080",
-    "MCP_SCRAPER_HOST": "127.0.0.1",
-    "MCP_SCRAPER_PORT": "8100",
-    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
-    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
-    "LLM_PROVIDER": "offline",
-}
+from tests.conftest import REQUIRED_ENV, settings_from_env
 
-
-def _settings():
-    from pix_compliance.config import Settings
-
-    return Settings(_env_file=None)
+_settings = settings_from_env
 
 
 @pytest.fixture(autouse=True)
@@ -236,14 +214,67 @@ def test_get_health_reporta_degradado_sem_lancar_erro(monkeypatch) -> None:
 
 
 # --- POST /runs --------------------------------------------------------
+# `POST /runs` delega inteiramente a `run_pipeline` (SPEC-015/016, SPEC-017
+# FR-002) — o mesmo handler do CLI/scheduler, nunca uma segunda
+# implementação de orquestração (research.md, Decisão 1). `run_pipeline`
+# sempre lê o singleton `pix_compliance.config.settings` (nunca o parâmetro
+# `settings` injetado pela rota), então o teste precisa recarregar
+# `pix_compliance.config` depois de aplicar o ambiente — mesmo padrão já
+# estabelecido em `tests/test_orchestrator_agent.py::_reload_settings`.
+#
+# `LLM_PROVIDER=offline` sozinho não basta para o Scraper/Extractor reais
+# (que exigem tool calling via MCP): sem um modelo injetado, o agente usa
+# `TestModel()` do próprio Pydantic AI, que chama ferramentas com
+# argumentos de exemplo genéricos, não uma decisão determinística real —
+# por isso o teste intercepta `run_pipeline` para injetar os mesmos
+# `FunctionModel`s determinísticos já usados por
+# `tests/test_orchestrator_agent.py::TestPipelineCompleto`, mantendo o
+# restante do pipeline (MCP real, agentes reais, rota HTTP real) intacto.
 
 
-def test_post_runs_dispara_pipeline_e_retorna_resultado_completo(client) -> None:
+def test_post_runs_dispara_pipeline_completo_com_as_seis_etapas(
+    client, monkeypatch, mock_bcb_server
+) -> None:
+    import importlib
+
+    from pydantic_ai.models.function import FunctionModel
+
+    from tests.conftest import free_port
+    from tests.test_orchestrator_agent import (
+        _echo_normativo_id_analyzer_decision,
+        _generic_valid_extractor_decision,
+    )
+    from tests.test_scraper_agent import _make_collect_all_decision
+
+    monkeypatch.setenv("BCB_BASE_URL", mock_bcb_server.base_url)
+    monkeypatch.setenv("MCP_SCRAPER_HOST", "127.0.0.1")
+    monkeypatch.setenv("MCP_SCRAPER_PORT", str(free_port()))
+
+    import pix_compliance.config as config_module
+
+    importlib.reload(config_module)
+
+    import pix_compliance.agents.orchestrator_agent as orch_module
+
+    run_pipeline_real = orch_module.run_pipeline
+
+    async def _run_pipeline_com_modelos_deterministicos(request, **kwargs):
+        return await run_pipeline_real(
+            request,
+            model_scraper=FunctionModel(_make_collect_all_decision()),
+            model_extractor=FunctionModel(_generic_valid_extractor_decision()),
+            model_analyzer=FunctionModel(_echo_normativo_id_analyzer_decision()),
+        )
+
+    monkeypatch.setattr(
+        orch_module, "run_pipeline", _run_pipeline_com_modelos_deterministicos
+    )
+
     resposta = client.post(
         "/runs",
         json={
             "pipeline_id": "run-teste",
-            "fontes": ["https://mock-bcb.local/normativos"],
+            "fontes": [mock_bcb_server.base_url],
             "forcar_reprocessamento": False,
         },
     )
@@ -253,6 +284,16 @@ def test_post_runs_dispara_pipeline_e_retorna_resultado_completo(client) -> None
     assert corpo["pipeline_id"] == "run-teste"
     assert corpo["sucesso"] is True
     assert corpo["concluido_em"] is not None
+    nomes_etapas = [etapa["nome"] for etapa in corpo["etapas"]]
+    assert nomes_etapas == [
+        "scrape",
+        "extract",
+        "compliance_analyzer",
+        "knowledge_builder",
+        "conformance_validator",
+        "report_consolidator",
+    ]
+    assert all(etapa["status"] == "sucesso" for etapa in corpo["etapas"])
 
 
 def test_post_runs_corpo_invalido_retorna_422(client) -> None:

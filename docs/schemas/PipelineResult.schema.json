@@ -4,6 +4,21 @@
       "additionalProperties": false,
       "description": "Métrica de uma etapa individual do pipeline orquestrado (SPEC-015).\n\nSempre registrada mesmo quando a etapa falha — `status` distingue uma\nfalha que abortou o pipeline (`falhou`) de uma que foi tolerada\nconforme sua política (`degradada`/`ignorada`).",
       "properties": {
+        "contadores": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contadores"
+        },
         "duracao_segundos": {
           "minimum": 0,
           "title": "Duracao Segundos",

@@ -31,6 +31,7 @@ pequenas e fortemente relacionadas, girando em torno do mesmo entrypoint
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import http.server
 import threading
 import time
@@ -62,6 +63,7 @@ from pix_compliance.models import (
     PipelineRequest,
     PipelineResult,
     RegraExtraida,
+    StatusConformidade,
 )
 from pix_compliance.object_store import S3ObjectStore
 from pix_compliance.vector_store import PgVectorStore
@@ -75,6 +77,7 @@ logger = structlog.get_logger()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MOCK_BCB_DIR = REPO_ROOT / "mock_bcb"
+_REPORTS_DIR = Path("reports")
 
 
 class StepPolicy:
@@ -113,7 +116,10 @@ _pipeline_lock = asyncio.Lock()
 
 
 async def _run_step(
-    nome: str, policy: str, corotina: Callable[[], Awaitable[object]]
+    nome: str,
+    policy: str,
+    corotina: Callable[[], Awaitable[object]],
+    contadores_fn: Callable[[object], dict[str, int]] | None = None,
 ) -> tuple[object | None, EtapaMetric]:
     """Envolve a execução de uma etapa: mede duração, aplica a política de
     falha, e sempre devolve um `EtapaMetric` — mesmo quando a etapa falha.
@@ -123,13 +129,26 @@ async def _run_step(
     `EtapaMetric.status == "falhou"` após cada etapa/grupo de etapas
     paralelas concluir. Isso evita a complexidade de cancelar tarefas
     irmãs no meio de um `asyncio.gather` quando uma delas falha
-    (research.md, Decisão 4)."""
+    (research.md, Decisão 4).
+
+    `contadores_fn`, quando fornecido, deriva os contadores agregados da
+    etapa (SPEC-017, FR-007) a partir do `resultado` já produzido — só
+    chamado em caso de sucesso, nunca em caso de falha/exceção."""
     inicio = time.monotonic()
     try:
         resultado = await corotina()
         duracao = time.monotonic() - inicio
-        logger.info("orchestrator_etapa_concluida", etapa=nome, duracao_segundos=duracao)
-        return resultado, EtapaMetric(nome=nome, duracao_segundos=duracao, status="sucesso")
+        contadores = contadores_fn(resultado) if contadores_fn is not None else None
+        logger.info(
+            "pipeline_etapa_concluida",
+            nome=nome,
+            status="sucesso",
+            duracao_segundos=duracao,
+            contadores=contadores,
+        )
+        return resultado, EtapaMetric(
+            nome=nome, duracao_segundos=duracao, status="sucesso", contadores=contadores
+        )
     except Exception as exc:  # noqa: BLE001 — captura ampla e deliberada: toda etapa passa por aqui
         duracao = time.monotonic() - inicio
         if policy == StepPolicy.FATAL:
@@ -151,6 +170,21 @@ async def _run_step(
         return None, EtapaMetric(nome=nome, duracao_segundos=duracao, status=status)
 
 
+def _start_daemon_thread_com_contexto(target: Callable[[], object]) -> threading.Thread:
+    """`threading.Thread` comum começa com um `contextvars.Context` vazio —
+    o `correlation_id` já vinculado (via `structlog.contextvars`,
+    `bind_run_correlation_id()`) não apareceria nos logs desta thread sem
+    copiar o contexto explicitamente no momento da criação (SPEC-017,
+    FR-006; research.md, Decisão 2). Só resolve propagação para os
+    servidores efêmeros deste módulo (mesmo processo, `bootstrap_local_servers`)
+    — um `mcp-scraper` como container separado (SPEC-016) está fora do
+    alcance de `contextvars`, que não cruza processos."""
+    contexto = contextvars.copy_context()
+    thread = threading.Thread(target=lambda: contexto.run(target), daemon=True)
+    thread.start()
+    return thread
+
+
 def _start_mock_bcb_server(settings: Settings) -> tuple[http.server.HTTPServer, threading.Thread]:
     """Sobe uma cópia efêmera do site mock do BCB (`mock_bcb/`, SPEC-003)
     em processo, no host/porta já configurados em `settings.bcb_base_url`
@@ -165,8 +199,7 @@ def _start_mock_bcb_server(settings: Settings) -> tuple[http.server.HTTPServer, 
         return http.server.SimpleHTTPRequestHandler(*args, directory=str(MOCK_BCB_DIR), **kwargs)
 
     server = http.server.HTTPServer((host, port), _handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    thread = _start_daemon_thread_com_contexto(server.serve_forever)
     return server, thread
 
 
@@ -186,8 +219,7 @@ def _start_mcp_server(settings: Settings) -> tuple[uvicorn.Server, threading.Thr
         log_level="warning",
     )
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
+    thread = _start_daemon_thread_com_contexto(server.run)
 
     deadline = time.monotonic() + 5
     while not server.started and time.monotonic() < deadline:
@@ -328,6 +360,7 @@ async def _executar_etapas(
         lambda: asyncio.to_thread(
             run_scraper_agent, settings, mcp_url, context.object_store, model_scraper
         ),
+        contadores_fn=lambda resultado: {"documentos_coletados": len(resultado.documentos)},
     )
     etapas.append(metric)
     if metric.status == "falhou":
@@ -347,7 +380,12 @@ async def _executar_etapas(
             normativos.append(normativo)
         return normativos
 
-    normativos, metric = await _run_step("extract", StepPolicy.FATAL, _extract_todos)
+    normativos, metric = await _run_step(
+        "extract",
+        StepPolicy.FATAL,
+        _extract_todos,
+        contadores_fn=lambda resultado: {"normativos_extraidos": len(resultado)},
+    )
     etapas.append(metric)
     if metric.status == "falhou":
         return None
@@ -361,11 +399,13 @@ async def _executar_etapas(
             "compliance_analyzer",
             StepPolicy.FATAL,
             lambda: analyze_batch(settings, normativos, model_analyzer),
+            contadores_fn=lambda resultado: {"regras_extraidas": len(resultado)},
         ),
         _run_step(
             "knowledge_builder",
             StepPolicy.DEGRADABLE,
             lambda: asyncio.to_thread(index_normativos, settings, context.vector_store, normativos),
+            contadores_fn=lambda _resultado: {"normativos_indexados": len(normativos)},
         ),
     )
     etapas.append(metric_analyzer)
@@ -379,7 +419,7 @@ async def _executar_etapas(
         regras_por_normativo.setdefault(regra.normativo_id, []).append(regra)
 
     async def _conformance() -> object:
-        return await asyncio.to_thread(
+        report = await asyncio.to_thread(
             build_conformance_report,
             settings,
             uuid.uuid4().hex,
@@ -387,9 +427,27 @@ async def _executar_etapas(
             regras_por_normativo,
             model_conformance,
         )
+        # Persistido em disco aqui (não só publicado via ReportOutput pelo
+        # Report Consolidator) porque `GET /compliance` (SPEC-013) lê
+        # `reports/*.conformance.json` diretamente — antes desta feature,
+        # só o caminho antigo e duplicado de `POST /runs` escrevia esse
+        # arquivo; CLI/scheduler nunca o produziam (SPEC-017, achado da
+        # auditoria em research.md).
+        _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        (_REPORTS_DIR / f"{report.report_id}.conformance.json").write_text(
+            report.model_dump_json(indent=2), encoding="utf-8"
+        )
+        return report
+
+    def _contadores_conformance(report: object) -> dict[str, int]:
+        gaps = sum(1 for item in report.itens if item.status != StatusConformidade.CONFORME)
+        return {"gaps_encontrados": gaps}
 
     conformance_report, metric = await _run_step(
-        "conformance_validator", StepPolicy.FATAL, _conformance
+        "conformance_validator",
+        StepPolicy.FATAL,
+        _conformance,
+        contadores_fn=_contadores_conformance,
     )
     etapas.append(metric)
     if metric.status == "falhou":

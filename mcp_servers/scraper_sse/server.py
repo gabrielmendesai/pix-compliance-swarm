@@ -5,10 +5,23 @@ Registra as três ferramentas (`list_normativos`, `fetch_normativo`,
 implementação concreta do `Adapter`, ver `adapters.py`). O documento bruto
 de `fetch_normativo` e o estado de hashes conhecidos de `detect_changes` são
 persistidos via `ObjectStore` (SPEC-006).
+
+Cada ferramenta loga entrada/saída (`mcp_tool_chamada`/`mcp_tool_concluida`,
+SPEC-017 FR-006) via `structlog` — reaproveita o mesmo logger/config já
+usado pelo resto do projeto (`pix_compliance.logging`), nunca um segundo
+mecanismo de logging. Quando este servidor roda na mesma thread iniciada
+por `orchestrator_agent._start_mcp_server` (modo `bootstrap_local_servers`,
+SPEC-016), o `correlation_id` já vinculado pelo Orchestrator (via
+`contextvars`) aparece automaticamente nesses logs — a thread herda o
+contexto no momento em que é criada (`contextvars.copy_context()`), não
+precisa ser passado explicitamente por parâmetro de ferramenta.
 """
 
+import functools
+import time
 from datetime import UTC, datetime
 
+import structlog
 from mcp.server.fastmcp import FastMCP
 
 from pix_compliance.config import Settings
@@ -25,10 +38,44 @@ from .models import (
     NormativoRef,
 )
 
+logger = structlog.get_logger()
+
 
 class NormativoNotFoundError(Exception):
     """`fetch_normativo` chamado com um `id` que não existe na listagem —
     vira um erro MCP claro (isError=True), não uma exceção crua propagada."""
+
+
+def _log_tool_call(nome: str, fn):
+    """Envolve uma ferramenta MCP com logging estruturado de entrada/saída
+    — usado como decorator interno, empilhado com `@app.tool()`.
+    `functools.wraps` preserva `__signature__`/`__wrapped__` para que
+    `@app.tool()` continue extraindo o schema JSON da função original, não
+    do `*args, **kwargs` deste wrapper."""
+
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        logger.info("mcp_tool_chamada", tool=nome)
+        inicio = time.monotonic()
+        try:
+            resultado = fn(*args, **kwargs)
+        except Exception:
+            logger.info(
+                "mcp_tool_concluida",
+                tool=nome,
+                duracao_segundos=time.monotonic() - inicio,
+                sucesso=False,
+            )
+            raise
+        logger.info(
+            "mcp_tool_concluida",
+            tool=nome,
+            duracao_segundos=time.monotonic() - inicio,
+            sucesso=True,
+        )
+        return resultado
+
+    return _wrapped
 
 
 def build_server(
@@ -72,6 +119,7 @@ def build_server(
         return True
 
     @app.tool()
+    @functools.partial(_log_tool_call, "list_normativos")
     def list_normativos(filtros: NormativoFilter) -> list[NormativoListItem]:
         """Lista os normativos do site mock do BCB, opcionalmente filtrados
         por `numero` (substring do identificador) ou `categoria` (substring
@@ -84,6 +132,7 @@ def build_server(
         return itens
 
     @app.tool()
+    @functools.partial(_log_tool_call, "fetch_normativo")
     def fetch_normativo(id: str) -> FetchNormativoResult:
         """Coleta o conteúdo bruto de um normativo específico e persiste uma
         cópia no ObjectStore, retornando apenas metadados de confirmação
@@ -110,6 +159,7 @@ def build_server(
         )
 
     @app.tool()
+    @functools.partial(_log_tool_call, "detect_changes")
     def detect_changes(since: datetime | None = None) -> list[ChangeRecord]:
         """Compara o hash atual de cada normativo contra o último hash
         conhecido (persistido no ObjectStore), retornando os novos/alterados

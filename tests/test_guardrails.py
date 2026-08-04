@@ -69,6 +69,16 @@ class TestOutrosTipos:
         assert "@exemplo.com" in resultado.texto_mascarado
         assert any(r.tipo == TipoPII.EMAIL for r in resultado.relatorios)
 
+    def test_email_com_parte_local_de_um_unico_caractere_nao_quebra_o_mascaramento(self):
+        # Auditoria de cobertura (SPEC-017, FR-003/FR-009): a parte local
+        # de um único caractere é um caso de borda de
+        # `_mascarar_email` — sem essa cobertura, um bug ali poderia
+        # devolver a parte local sem máscara alguma silenciosamente.
+        resultado = guard("Contato: a@exemplo.com para dúvidas.")
+        assert "a@exemplo.com" not in resultado.texto_mascarado
+        assert "@exemplo.com" in resultado.texto_mascarado
+        assert any(r.tipo == TipoPII.EMAIL for r in resultado.relatorios)
+
     def test_telefone_e_mascarado_preservando_ddd(self):
         resultado = guard("Ligue para (11) 98765-4321 em caso de dúvida.")
         assert "(11) 98765-4321" not in resultado.texto_mascarado

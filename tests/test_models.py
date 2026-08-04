@@ -17,6 +17,7 @@ from pix_compliance.models import (
     CategoriaCompliance,
     ConformanceItem,
     ConformanceReport,
+    EtapaMetric,
     NormativoItem,
     Obrigatoriedade,
     PipelineRequest,
@@ -272,6 +273,25 @@ class TestSearchAndReportAndPipeline:
         )
         result_dump = result.model_dump()
         assert PipelineResult.model_validate(result_dump) == result
+
+
+class TestEtapaMetric:
+    """SPEC-017 (FR-007): `contadores` é aditivo — `EtapaMetric` sem esse
+    campo continua válido (default `None`), e o campo aceita um dict de
+    contadores agregados por etapa quando presente."""
+
+    def test_contadores_e_opcional_com_default_none(self):
+        etapa = EtapaMetric(nome="scrape", duracao_segundos=1.0, status="sucesso")
+        assert etapa.contadores is None
+
+    def test_contadores_aceita_dict_de_inteiros_por_etapa(self):
+        etapa = EtapaMetric(
+            nome="compliance_analyzer",
+            duracao_segundos=2.5,
+            status="sucesso",
+            contadores={"regras_extraidas": 12, "tokens_consumidos": 480},
+        )
+        assert etapa.contadores == {"regras_extraidas": 12, "tokens_consumidos": 480}
 
 
 class TestScrapeResult:

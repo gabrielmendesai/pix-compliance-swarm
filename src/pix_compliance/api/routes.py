@@ -16,21 +16,15 @@ suficiente para servir essas rotas sem introduzir uma tabela SQL nova.
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
-import uuid
 from pathlib import Path
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Query
 
-from pix_compliance.agents.compliance_analyzer_agent import analyze_batch
-from pix_compliance.agents.conformance_validator_agent import build_conformance_report
-from pix_compliance.agents.knowledge_builder_agent import index_normativos
 from pix_compliance.agents.knowledge_builder_agent import search as knowledge_search
-from pix_compliance.agents.report_consolidator_agent import consolidate_and_publish
 from pix_compliance.api.pagination import PaginatedResponse, paginate
 from pix_compliance.config import Settings
 from pix_compliance.config import settings as default_settings
@@ -40,7 +34,6 @@ from pix_compliance.models import (
     NormativoItem,
     PipelineRequest,
     PipelineResult,
-    RegraExtraida,
     ReportOutput,
     SearchQuery,
     SearchResult,
@@ -253,72 +246,17 @@ def post_reports(report_output: ReportOutput) -> ReportOutput:
     return report_output
 
 
-def _run_pipeline_sync(settings: Settings, request: PipelineRequest) -> PipelineResult:
-    """Orquestra os agentes já implementados sobre o corpus mock
-    (`fixtures/normativos.json`) — `request.fontes` é aceito e propagado ao
-    `PipelineResult`, mas não aciona uma coleta ao vivo via MCP scraper
-    (SPEC-007/008) nesta versão: isso exigiria um servidor MCP já em
-    execução como dependência externa do processo da API, fora do escopo
-    desta feature (esta rota consome os agentes já implementados como
-    consumidor fino, sem orquestrar infraestrutura de processo adicional).
-    Documentado explicitamente aqui e no README — não uma lacuna
-    silenciosa."""
-    iniciado_em = datetime.datetime.now()
-    try:
-        normativos = _carregar_normativos()
-        regras = asyncio.run(analyze_batch(settings, normativos))
-
-        regras_por_normativo: dict[str, list[RegraExtraida]] = {}
-        for regra in regras:
-            regras_por_normativo.setdefault(regra.normativo_id, []).append(regra)
-
-        report_id = uuid.uuid4().hex
-        conformance_report = build_conformance_report(
-            settings, report_id, normativos, regras_por_normativo
-        )
-
-        vector_store = PgVectorStore(settings)
-        index_normativos(settings, vector_store, normativos)
-
-        object_store = S3ObjectStore(settings)
-        report_output = consolidate_and_publish(
-            settings, object_store, conformance_report, normativos, regras
-        )
-
-        _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        (_REPORTS_DIR / f"{report_id}.conformance.json").write_text(
-            conformance_report.model_dump_json(indent=2), encoding="utf-8"
-        )
-
-        return PipelineResult(
-            pipeline_id=request.pipeline_id,
-            sucesso=True,
-            report=report_output,
-            erro=None,
-            iniciado_em=iniciado_em,
-            concluido_em=datetime.datetime.now(),
-        )
-    except Exception as exc:  # noqa: BLE001 — qualquer falha de qualquer etapa vira PipelineResult.erro, nunca 500
-        logger.error("pipeline_execucao_falhou", pipeline_id=request.pipeline_id, erro=str(exc))
-        return PipelineResult(
-            pipeline_id=request.pipeline_id,
-            sucesso=False,
-            report=None,
-            erro=str(exc),
-            iniciado_em=iniciado_em,
-            concluido_em=datetime.datetime.now(),
-        )
-
-
 @router.post(
     "/runs",
     tags=["runs"],
     summary="Dispara uma execução ad-hoc do pipeline completo",
     description=(
-        "Executa sincronamente Compliance Analyzer → Conformance Validator "
-        "→ Knowledge Builder → Report Consolidator sobre o corpus mock, "
-        "retornando o `PipelineResult` já completo (sem estado "
-        "pendente/assíncrono — ver research.md, Decisão 4)."
+        "Delega inteiramente a `run_pipeline` (SPEC-015/016) — o mesmo "
+        "handler usado pelo CLI (`make run`) e pelo scheduler (SPEC-017, "
+        "FR-002): Scraper → Extractor → Compliance Analyzer/Knowledge "
+        "Builder → Conformance Validator → Report Consolidator, retornando "
+        "o `PipelineResult` já completo (sem estado pendente/assíncrono — "
+        "ver research.md, Decisão 4 da SPEC-013)."
     ),
     response_model=PipelineResult,
     responses={
@@ -327,5 +265,7 @@ def _run_pipeline_sync(settings: Settings, request: PipelineRequest) -> Pipeline
         }
     },
 )
-def post_runs(request: PipelineRequest, settings: SettingsDep) -> PipelineResult:
-    return _run_pipeline_sync(settings, request)
+async def post_runs(request: PipelineRequest) -> PipelineResult:
+    from pix_compliance.agents.orchestrator_agent import run_pipeline
+
+    return await run_pipeline(request)

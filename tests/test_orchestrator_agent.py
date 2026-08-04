@@ -19,31 +19,12 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, User
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from structlog.testing import capture_logs
 
+from tests.conftest import REQUIRED_ENV
 from tests.test_scraper_agent import (  # noqa: F401
     RunningMcpServer,
     _make_collect_all_decision,
     running_mcp_server,
 )
-
-REQUIRED_ENV = {
-    "AWS_ACCESS_KEY_ID": "AKIAFAKEEXAMPLE",
-    "AWS_SECRET_ACCESS_KEY": "fake-secret",
-    "AWS_REGION": "us-east-1",
-    "BEDROCK_MODEL_ID": "anthropic.claude-3-fake",
-    "BEDROCK_EMBEDDINGS_MODEL_ID": "amazon.titan-embed-fake",
-    "API_URL": "http://mock-report-api.local",
-    "POSTGRES_DSN": "postgresql://pix:pix@localhost:5432/pix_compliance",
-    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
-    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
-    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
-    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
-    "BCB_BASE_URL": "http://localhost:8080",
-    "MCP_SCRAPER_HOST": "127.0.0.1",
-    "MCP_SCRAPER_PORT": "8100",
-    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
-    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
-    "LLM_PROVIDER": "offline",
-}
 
 _FAKE_HASH = "a" * 64
 
@@ -289,6 +270,95 @@ class TestPipelineCompleto:
 
         assert resultado.sucesso is True
         assert estado["chamadas"] >= 2
+
+
+class TestObservabilidade:
+    """SPEC-017 (User Story 3, FR-006/FR-007): audita se `correlation_id`
+    aparece de ponta a ponta nos logs, incluindo no servidor MCP separado
+    (não só dentro do processo do Orchestrator), e se os contadores
+    agregados por etapa são emitidos. Usa `bootstrap_local_servers=True`
+    (não `running_mcp_server`, que sobe o MCP num processo/thread própria
+    do teste, fora do alcance da correção de propagação desta feature) —
+    mesmo caminho de `make run` (quickstart.md, Cenário 5)."""
+
+    def test_pipeline_etapa_concluida_carrega_mesmo_correlation_id_e_contadores(
+        self, mock_bcb_server, monkeypatch, capsys
+    ) -> None:
+        import json
+
+        import structlog
+
+        from tests.conftest import free_port
+
+        monkeypatch.setenv("BCB_BASE_URL", mock_bcb_server.base_url)
+        monkeypatch.setenv("MCP_SCRAPER_HOST", "127.0.0.1")
+        monkeypatch.setenv("MCP_SCRAPER_PORT", str(free_port()))
+        _reload_settings(monkeypatch)
+
+        from pix_compliance.agents.orchestrator_agent import run_pipeline
+        from pix_compliance.models import PipelineRequest
+
+        request = PipelineRequest(pipeline_id="obs-teste", fontes=["https://mock-bcb.local/"])
+
+        # `capture_logs()` (structlog.testing) substitui a cadeia de
+        # processadores inteira por um único captor — descartaria
+        # `merge_contextvars`, apagando o `correlation_id` que este teste
+        # precisa inspecionar. `capsys` + uma config local equivalente à de
+        # produção resolve isso — mas com `cache_logger_on_first_use=False`
+        # (diferente de `configure_logging()` real): o logger de módulo do
+        # servidor MCP (`mcp_servers/scraper_sse/server.py`) é tocado pela
+        # primeira vez aqui (`bootstrap_local_servers=True`), e cachear seu
+        # bound logger permanentemente vazaria esta config para os testes
+        # de `test_scraper_mcp_server.py` (que dependem de `capture_logs()`
+        # funcionar), rodados depois na mesma sessão do pytest.
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                structlog.processors.add_log_level,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.JSONRenderer(),
+            ],
+            cache_logger_on_first_use=False,
+        )
+        try:
+            resultado = asyncio.run(
+                run_pipeline(
+                    request,
+                    bootstrap_local_servers=True,
+                    model_scraper=FunctionModel(_make_collect_all_decision()),
+                    model_extractor=FunctionModel(_generic_valid_extractor_decision()),
+                    model_analyzer=FunctionModel(_echo_normativo_id_analyzer_decision()),
+                )
+            )
+        finally:
+            structlog.reset_defaults()
+        linhas = capsys.readouterr().out.strip().splitlines()
+        logs = [json.loads(linha) for linha in linhas]
+
+        assert resultado.sucesso is True
+
+        eventos_etapa = [log for log in logs if log["event"] == "pipeline_etapa_concluida"]
+        nomes = [log["nome"] for log in eventos_etapa]
+        assert nomes == [
+            "scrape",
+            "extract",
+            "compliance_analyzer",
+            "knowledge_builder",
+            "conformance_validator",
+            "report_consolidator",
+        ]
+
+        correlation_ids = {log["correlation_id"] for log in eventos_etapa}
+        assert len(correlation_ids) == 1
+        (correlation_id,) = correlation_ids
+
+        por_nome = {log["nome"]: log for log in eventos_etapa}
+        assert por_nome["scrape"]["contadores"]["documentos_coletados"] == 4
+        assert por_nome["report_consolidator"]["contadores"] is None
+
+        eventos_mcp = [log for log in logs if log["event"] == "mcp_tool_chamada"]
+        assert eventos_mcp, "esperava pelo menos uma chamada de ferramenta MCP logada"
+        assert all(log["correlation_id"] == correlation_id for log in eventos_mcp)
 
 
 class TestPoliticaDeFalha:

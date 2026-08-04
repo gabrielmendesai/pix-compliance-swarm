@@ -16,24 +16,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from structlog.testing import capture_logs
 
-REQUIRED_ENV = {
-    "AWS_ACCESS_KEY_ID": "AKIAFAKEEXAMPLE",
-    "AWS_SECRET_ACCESS_KEY": "fake-secret",
-    "AWS_REGION": "us-east-1",
-    "BEDROCK_MODEL_ID": "anthropic.claude-3-fake",
-    "BEDROCK_EMBEDDINGS_MODEL_ID": "amazon.titan-embed-fake",
-    "API_URL": "http://localhost:8000",
-    "POSTGRES_DSN": "postgresql://pix:pix@localhost:5432/pix_compliance",
-    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
-    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
-    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
-    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
-    "BCB_BASE_URL": "http://localhost:8080",
-    "MCP_SCRAPER_HOST": "127.0.0.1",
-    "MCP_SCRAPER_PORT": "8100",
-    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
-    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
-}
+from tests.conftest import REQUIRED_ENV, settings_from_env
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "documents"
 SKILL_MD_PATH = Path(__file__).resolve().parent.parent / "skills" / "extractor-skill" / "SKILL.md"
@@ -56,10 +39,7 @@ def _required_env(monkeypatch):
         monkeypatch.setenv(key, value)
 
 
-def _settings():
-    from pix_compliance.config import Settings
-
-    return Settings(_env_file=None)
+_settings = settings_from_env
 
 
 @pytest.fixture

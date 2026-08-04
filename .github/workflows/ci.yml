@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      # LLM_PROVIDER=offline (SPEC-005) já isola a suíte inteira de rede e
+      # credenciais AWS reais (SPEC-017, research.md Decisão 0/5) — nenhum
+      # secret precisa ser configurado neste workflow.
+      - name: Testes (pytest)
+        run: pytest -q

@@ -176,7 +176,12 @@ def _mascarar_por_digitos(candidato: str, manter_inicio: int, manter_fim: int) -
 def _mascarar_email(candidato: str) -> str:
     local, _, dominio = candidato.partition("@")
     if len(local) <= 1:
-        local_mascarado = local
+        # Bug real encontrado pela auditoria da SPEC-017 (FR-003): a versão
+        # anterior devolvia `local` sem alteração aqui — um e-mail de parte
+        # local com 1 caractere era detectado como PII, mas o texto
+        # "mascarado" continuava sendo o e-mail original, sem máscara
+        # alguma (vazamento silencioso, Princípio V).
+        local_mascarado = "*" * len(local)
     else:
         local_mascarado = local[0] + "*" * (len(local) - 1)
     return f"{local_mascarado}@{dominio}"

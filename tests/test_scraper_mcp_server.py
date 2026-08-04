@@ -9,7 +9,6 @@ efêmera via fixture `mock_bcb_server`) e os serviços reais do SPEC-006
 
 import asyncio
 import hashlib
-import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -20,28 +19,10 @@ import uvicorn
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.types import CallToolResult, ListToolsResult
+from structlog.testing import capture_logs
 
-REQUIRED_ENV = {
-    "AWS_ACCESS_KEY_ID": "AKIAFAKEEXAMPLE",
-    "AWS_SECRET_ACCESS_KEY": "fake-secret",
-    "AWS_REGION": "us-east-1",
-    "BEDROCK_MODEL_ID": "anthropic.claude-3-fake",
-    "BEDROCK_EMBEDDINGS_MODEL_ID": "amazon.titan-embed-fake",
-    "API_URL": "http://localhost:8000",
-    "POSTGRES_DSN": "postgresql://pix:pix@localhost:5432/pix_compliance",
-    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
-    "OBJECT_STORAGE_ACCESS_KEY": "minioadmin",
-    "OBJECT_STORAGE_SECRET_KEY": "minioadmin",
-    "OBJECT_STORAGE_BUCKET": "pix-compliance-test",
-    "COMPLIANCE_ANALYZER_MAX_CONCURRENCY": "3",
-    "COMPLIANCE_ANALYZER_CONFIDENCE_THRESHOLD": "0.7",
-}
-
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+from tests.conftest import REQUIRED_ENV
+from tests.conftest import free_port as _free_port
 
 
 @dataclass
@@ -123,6 +104,28 @@ def test_handshake_and_list_tools_exposes_three_tools_with_schemas(
     for tool in result.tools:
         assert tool.inputSchema
         assert tool.outputSchema
+
+
+def test_fetch_normativo_emite_log_estruturado_de_entrada_e_saida(
+    running_server: RunningServer,
+) -> None:
+    """SPEC-017 (FR-006): o servidor MCP hoje não loga nada — auditoria de
+    research.md, Decisão 2. Chamar uma ferramenta MUST produzir eventos de
+    log estruturado de entrada/saída, com o nome da ferramenta e a duração
+    (`mcp_tool_chamada`/`mcp_tool_concluida`)."""
+    with capture_logs() as logs:
+        asyncio.run(
+            _call_tool(running_server.base_url, "fetch_normativo", {"id": "normativo-101-2021-v1"})
+        )
+
+    eventos = [log["event"] for log in logs]
+    assert "mcp_tool_chamada" in eventos
+    assert "mcp_tool_concluida" in eventos
+    chamada = next(log for log in logs if log["event"] == "mcp_tool_chamada")
+    concluida = next(log for log in logs if log["event"] == "mcp_tool_concluida")
+    assert chamada["tool"] == "fetch_normativo"
+    assert concluida["tool"] == "fetch_normativo"
+    assert "duracao_segundos" in concluida
 
 
 # --- User Story 2: detecção de mudança por hash ------------------------------

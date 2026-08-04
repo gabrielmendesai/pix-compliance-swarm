@@ -309,6 +309,12 @@ class EtapaMetric(BaseModel):
     nome: str
     duracao_segundos: float = Field(ge=0)
     status: Literal["sucesso", "degradada", "ignorada", "falhou"]
+    # Contadores agregados por etapa (SPEC-017, FR-007) — chaves variam por
+    # etapa (ex. "documentos_coletados" só em scrape, "regras_extraidas" em
+    # extract/compliance_analyzer); `None` quando a etapa não produz
+    # contador aplicável. Informativo/observacional, nunca lido por lógica
+    # de decisão do pipeline.
+    contadores: dict[str, int] | None = None
 
 
 class PipelineResult(BaseModel):

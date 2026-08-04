@@ -237,18 +237,17 @@ def test_post_runs_dispara_pipeline_completo_com_as_seis_etapas(client, monkeypa
 
     from pydantic_ai.models.function import FunctionModel
 
-    from tests.test_orchestrator_agent import (
-        _echo_normativo_id_analyzer_decision,
-        _generic_valid_extractor_decision,
-    )
-    from tests.test_scraper_agent import _make_collect_all_decision
-
     # Sem `mock_bcb_server`/porta manual: `run_pipeline` (chamado com
     # `bootstrap_local_servers=True` por padrão) já sobe seu próprio mock
     # BCB e servidor MCP em portas efêmeras escolhidas pelo SO (SPEC-017,
     # correção do achado de CI real — porta fixa causava
     # `Address already in use` de forma determinística em Linux).
     import pix_compliance.config as config_module
+    from tests.test_orchestrator_agent import (
+        _echo_normativo_id_analyzer_decision,
+        _generic_valid_extractor_decision,
+    )
+    from tests.test_scraper_agent import _make_collect_all_decision
 
     importlib.reload(config_module)
 
